@@ -39,4 +39,12 @@ public class DefaultTopicRouter implements TopicRouter {
     public DomainTopicConfig config() {
         return config;
     }
+
+    public synchronized void addMapping(TopicMapping mapping) {
+        mappingByDomain.put(mapping.domain(), mapping);
+    }
+
+    public synchronized void removeMapping(String domain) {
+        mappingByDomain.remove(domain);
+    }
 }
