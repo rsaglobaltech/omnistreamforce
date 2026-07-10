@@ -1263,8 +1263,8 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 1    | Fundacion y estructura del proyecto | Completado |
 | 2    | Modelo de dominios y esquemas (healthcare + ecommerce) | Completado |
 | 3    | Motor de generacion y planificador | Completado |
-| 4    | Integracion con Kafka Producer | En progreso |
-| 5    | Serializadores multi-formato | Pendiente |
+| 4    | Integracion con Kafka Producer | Completado (tests IT se omiten sin Docker-TC; pasan en CI) |
+| 5    | Serializadores multi-formato | En progreso |
 | 6    | Dominios adicionales (energy, autos, highway) | Pendiente |
 | 7    | Integracion con IA (LLM) | Pendiente |
 | 8    | CLI interactivo completo | Pendiente |
