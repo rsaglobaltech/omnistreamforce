@@ -1261,8 +1261,8 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 |------|-------------|--------|
 | Git  | Setup repo, ramas master/develop, remoto | Completado |
 | 1    | Fundacion y estructura del proyecto | Completado |
-| 2    | Modelo de dominios y esquemas (healthcare + ecommerce) | En progreso |
-| 3    | Motor de generacion y planificador | Pendiente |
+| 2    | Modelo de dominios y esquemas (healthcare + ecommerce) | Completado |
+| 3    | Motor de generacion y planificador | En progreso |
 | 4    | Integracion con Kafka Producer | Pendiente |
 | 5    | Serializadores multi-formato | Pendiente |
 | 6    | Dominios adicionales (energy, autos, highway) | Pendiente |

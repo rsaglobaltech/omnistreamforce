@@ -1,7 +1,7 @@
 package de.omnistreamforce.domain;
 
 import de.omnistreamforce.core.Event;
-import de.omnistreamforce.core.EventType;
+import de.omnistreamforce.core.EventSchema;
 
 import java.util.List;
 
@@ -12,12 +12,23 @@ public interface DomainGenerator {
 
     String getDomainName();
 
+    /**
+     * Nombres logicos de los tipos de evento normales que el dominio puede generar.
+     */
     List<String> getSupportedEventTypes();
 
     /**
-     * Genera un evento del tipo indicado (normal o de error segun {@link EventType#isError()}).
-     *
-     * @param eventType tipo de evento soportado por el dominio (nombre logico del evento)
+     * Nombres logicos de los tipos de evento de error que el dominio puede generar.
+     */
+    List<String> getErrorTypes();
+
+    /**
+     * Esquema completo del dominio (campos comunes, tipos de evento y especificacion de errores).
+     */
+    EventSchema getSchema();
+
+    /**
+     * Genera un evento del tipo indicado (nombre logico del evento, normal o de error).
      */
     Event generateEvent(String eventType);
 

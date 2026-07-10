@@ -13,15 +13,4 @@
 
     <artifactId>omnistreamforce-domain-autos</artifactId>
     <name>OmniStreamForce Domain - Autos</name>
-
-    <dependencies>
-        <dependency>
-            <groupId>de.omnistreamforce</groupId>
-            <artifactId>omnistreamforce-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.datafaker</groupId>
-            <artifactId>datafaker</artifactId>
-        </dependency>
-    </dependencies>
 </project>

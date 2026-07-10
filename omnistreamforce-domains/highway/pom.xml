@@ -13,15 +13,4 @@
 
     <artifactId>omnistreamforce-domain-highway</artifactId>
     <name>OmniStreamForce Domain - Highway</name>
-
-    <dependencies>
-        <dependency>
-            <groupId>de.omnistreamforce</groupId>
-            <artifactId>omnistreamforce-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.datafaker</groupId>
-            <artifactId>datafaker</artifactId>
-        </dependency>
-    </dependencies>
 </project>
