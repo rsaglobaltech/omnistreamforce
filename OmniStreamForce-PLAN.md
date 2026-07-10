@@ -1257,6 +1257,9 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 
 ## Progreso de Implementacion
 
+> Ultima actualizacion: Fases 1-5 completadas y empujadas a `develop`.
+> Todos los commits estan a nombre de Raul Alejandro Salas (alejandrosalas0891@gmail.com).
+
 | Fase | Descripcion | Estado |
 |------|-------------|--------|
 | Git  | Setup repo, ramas master/develop, remoto | Completado |
@@ -1270,6 +1273,41 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 8    | CLI interactivo completo | Pendiente |
 | 9    | Sistema de configuracion y perfiles | Pendiente |
 | 10   | Docker, distribucion y documentacion | Pendiente |
+
+### Notas de Avance por Fase
+
+**Fase 1 - Fundacion (commit `7a99d51`)**
+- Parent POM multi-modulo con dependencyManagement (kafka-clients 3.7.0, picocli 4.7.6, jackson 2.17.0, snakeyaml, datafaker, slf4j/logback, aws-msk-iam-auth, awssdk, junit 5, testcontainers).
+- Modulos: omnistreamforce-core, omnistreamforce-domains (agregador de 5 submodulos), omnistreamforce-ai, omnistreamforce-cli.
+- core: Event (record), EventType, Severity, DomainGenerator (interface), DomainContext, DomainRegistry (ServiceLoader), TopicMapping, DomainTopicConfig, TopicRouter, DefaultTopicRouter, RandomUtils.
+- CLI: OmniStreamForceApp (Picocli) con banner ASCII + deteccion de plataforma; fat JAR con maven-shade-plugin.
+- Criterios: `mvn clean compile` OK, `java -jar omnistreamforce-cli.jar` muestra banner, 5 tests core OK.
+
+**Fase 2 - Dominios y esquemas (commit `0f7d209`)**
+- core: EventSchema, FieldDefinition, EventSpec, ErrorSpec (records); AbstractDomainGenerator (base con helpers).
+- DomainGenerator ampliado con getSchema() y getErrorTypes().
+- HealthcareGenerator: 5 eventos normales + 4 de error, DataFaker, esquema completo, registro SPI.
+- EcommerceGenerator: 5 eventos normales + 4 de error, DataFaker, esquema completo, registro SPI.
+- Convencion adoptada: eventType guarda NORMAL/ERROR; el nombre concreto del evento va en metadata.eventName / errorType.
+- 29 tests (core + healthcare + ecommerce) OK.
+
+**Fase 3 - Motor de generacion (commit `b55ffd4`)**
+- engine: PublishingMode, KeyStrategy, GenerationConfig, TopicStats, GenerationStats (thread-safe, snapshot), EventPublisher, EventScheduler (STEADY/BURST/SPIKE/RAMP con ScheduledExecutorService + virtual threads), ErrorInjector (cobertura de tipos + distribucion de severidad), GenerationEngine, MultiDomainEngine (virtual threads, add/remove en caliente, aggregate stats).
+- serializer: EventSerializer (interface), JsonEventSerializer (basico, ampliado en Fase 5).
+- Tests con StubDomainGenerator + RecordingPublisher: 22 tests core OK (scheduler, engine, multidominio, error injector).
+
+**Fase 4 - Integracion Kafka (commit `431c1ad`)**
+- kafka: ClusterType, KafkaConnectionConfig (builder, props producer/admin), MskClusterConfig (IAM y SCRAM-SHA-512, toKafkaProps sin AWS), KafkaConnectionManager (AutoCloseable, producer + admin, describeCluster, connect), ClusterInfo, KafkaEventPublisher (asincrono con callbacks, key strategies RANDOM/ENTITY_ID/ROUND_ROBIN, metricas, retry configurable), KafkaTopicManager (list/listWithPartitions/create/verifyOrCreate/getTopicInfo), TopicInfo.
+- Tests: MskClusterConfigTest (3 OK, props IAM/SCRAM verificadas sin AWS). KafkaIntegrationTest con Testcontainers (6 escenarios) que se omite limpiamente si Docker/Testcontainers no detectable localmente; correran en CI Linux.
+
+**Fase 5 - Serializadores (commit `dc4a7d5`)**
+- serializer: JsonEventSerializer (pretty-print configurable, timestamp ISO-8601 o epoch con deserializador leniente), AvroEventSerializer (schema estatico, payload como JSON string, round-trip), ProtobufEventSerializer (Struct well-known, binario real, round-trip), SerializerFactory (JSON/AVRO/PROTOBUF).
+- Tests round-trip + factory: 12 tests OK. Total core: 37 tests.
+
+### Verificacion rapida
+- `mvn clean test` -> BUILD SUCCESS (todos los modulos).
+- `mvn -pl omnistreamforce-cli -am package -DskipTests` -> fat JAR funcional.
+- `java -jar omnistreamforce-cli/target/omnistreamforce-cli.jar` -> banner OK.
 
 ---
 
