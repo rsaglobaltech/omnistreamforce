@@ -1,0 +1,185 @@
+# OmniStreamForce
+
+Generador de datos configurable para **Apache Kafka**: eliges uno o varios dominios de negocio,
+los mapeas a topics y empieza a publicar eventos realistas —normales y de error— al ritmo que
+quieras. Además de publicar directo a Kafka, puede escribir los eventos en una base de datos con
+el **patrón Outbox** y sacarlos hacia Kafka por un **relay propio** o por **CDC con Debezium**.
+
+Java 21 · Maven multi-módulo · sin frameworks pesados.
+
+---
+
+## Qué hace
+
+| | |
+|---|---|
+| **Multi-dominio** | Dominios como plugins descubiertos por SPI: healthcare, ecommerce y fastfood (franquicias Burger King y McDonald's) |
+| **Multi-topic** | Cada dominio publica a su topic, con topic separado para los errores si se quiere |
+| **Dual-stream** | Eventos normales y de error mezclados, con tasa de error configurable y errores coherentes (no ruido aleatorio) |
+| **Control de flujo** | Modos STEADY, BURST, SPIKE y RAMP; EPS y tasa de error ajustables en caliente |
+| **Multi-formato** | JSON, Avro y Protobuf |
+| **Cloud-native** | Local, AWS MSK (IAM y SASL/SCRAM) y Confluent Cloud |
+| **Persistencia** | Patrón Outbox real: fila de negocio y fila de outbox en la misma transacción |
+| **Dos salidas del outbox** | Relay propio por polling, o Debezium leyendo el WAL. O ambos, para compararlos |
+
+## Arranque rápido
+
+Requisitos: **JDK 21** y **Maven 3.9+**. Para los tests de integración y el stack de CDC, Docker.
+
+```bash
+mvn clean package -DskipTests
+java -jar omnistreamforce-cli/target/omnistreamforce-cli.jar list-domains
+```
+
+Con un Kafka en `localhost:9092`:
+
+```bash
+java -jar omnistreamforce-cli/target/omnistreamforce-cli.jar connect -b localhost:9092
+java -jar omnistreamforce-cli/target/omnistreamforce-cli.jar interactive
+```
+
+El flujo interactivo pregunta por: cluster → topics → dominios y su mapeo → destino → formato,
+modo, duración y estrategia de clave. Después muestra un panel en vivo por dominio y por topic.
+
+```
+Paso 3: Dominios y mapeo a topics
+  Dominio: fastfood
+    Eventos normales: OrderPlaced, OrderPaid, KitchenPrepStarted, ...
+    Eventos de error: PaymentDeclined, KitchenDelay, ColdChainBreach, ...
+? Topic de destino [fastfood-events]:
+? Publicar los errores en un topic aparte? (S/n):
+? Eventos por segundo [50]: 120
+? Tasa de error (%) [10.0]: 15
+```
+
+## Comandos
+
+| Comando | Para qué |
+|---|---|
+| `interactive` | Flujo guiado completo y dashboard en vivo |
+| `connect -b <servers>` | Valida el acceso a un cluster y lista sus topics |
+| `list-domains [-d]` | Dominios disponibles; con `-d`, también sus campos |
+| `web [-p 8080]` | Interfaz web |
+| `help` | Ayuda |
+
+## Dominios
+
+Los dominios se descubren en el classpath por `ServiceLoader`, así que añadir uno **no requiere
+tocar el core**: basta un módulo nuevo que implemente `DomainGenerator` y se registre en
+`META-INF/services`.
+
+| Dominio | Eventos normales | Eventos de error |
+|---|---|---|
+| `healthcare` | 5 (admisión, constantes, medicación, laboratorio, alta) | 4 |
+| `ecommerce` | 5 (pedido, pago, inventario, envío, cancelación) | 4 |
+| `fastfood` | 13 (pedidos y cocina, drive-thru y canales, inventario) | 8 |
+
+`fastfood` modela franquicias: la marca viaja en el payload (`brand`) y en los identificadores
+(`storeId=BK-4821`, `orderId=ORD-MCD-38472910`), con carta e ingredientes propios de cada una.
+Añadir otra franquicia es añadir una constante al enum `FastFoodBrand`.
+
+Los eventos de error son coherentes con su semántica, no valores al azar: `KitchenDelay` supera
+siempre el SLA de cocina, `ColdChainBreach` supera el umbral de −18 °C, `IngredientOutOfStock`
+deja el stock a cero y lista los artículos bloqueados.
+
+## Destinos
+
+```
+DomainGenerator ─▶ GenerationEngine ─▶ EventPublisher
+                                          │
+              ┌───────────────────────────┼───────────────────────────┐
+              ▼                           ▼                           ▼
+      KafkaEventPublisher        JdbcOutboxPublisher          CompositePublisher
+              │                           │                      (los dos)
+            Kafka          tabla de negocio + osf_outbox
+                                          │
+                        ┌─────────────────┴─────────────────┐
+                        ▼                                   ▼
+                 OutboxRelay (polling)              Debezium (CDC del WAL)
+                 → fastfood-events                  → cdc.fastfood-events
+```
+
+`PublisherFactory.create(SinkConfig)` devuelve el publisher según el destino elegido —`KAFKA`,
+`DB_OUTBOX` o `DUAL`— **sin cambiar la firma del motor**:
+
+```java
+EventPublisher publisher = PublisherFactory.create(sinkConfig);
+MultiDomainEngine engine = new MultiDomainEngine(serializer, publisher);
+```
+
+### Patrón Outbox
+
+Cada evento se escribe como fila de negocio **y** fila de outbox en la misma transacción, así que
+nunca existe una sin la otra. Las tablas de negocio se generan a partir del `EventSchema` de cada
+dominio: una columna tipada por campo declarado, más `payload` (el evento completo), `metadata` y
+`payload_extra` con las claves que el esquema no declara. Esa última columna convierte la deriva
+de esquema en algo medible:
+
+```sql
+SELECT k, count(*) FROM osf_fastfood_events, LATERAL jsonb_object_keys(payload_extra) k
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+`publish()` no toca la base de datos: encola, y unos hilos escritores agrupan en lotes (una
+transacción por lote). El motor trabaja con ticks de 100 ms por dominio, y un INSERT síncrono por
+evento se comería ese presupuesto.
+
+### Relay y CDC
+
+El stack de `docker/` levanta PostgreSQL con replicación lógica, Kafka y Debezium:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+./docker/register-connector.sh        # register-connector.ps1 en Windows
+```
+
+Detalles y verificación paso a paso en [`docker/README.md`](docker/README.md).
+
+El relay y el CDC pueden convivir publicando a topics distintos (`fastfood-events` y
+`cdc.fastfood-events`), lo que permite compararlos sin duplicar nada.
+
+## Módulos
+
+```
+omnistreamforce-core          modelo, motor, routing, serializadores y capa Kafka
+omnistreamforce-domains       un submódulo por dominio (healthcare, ecommerce, fastfood, ...)
+omnistreamforce-persistence   sink de base de datos, generación de DDL, outbox y relay
+omnistreamforce-cli           interfaz de línea de comandos
+omnistreamforce-web           interfaz web
+omnistreamforce-ai            integración con LLM (pendiente)
+```
+
+## Tests
+
+```bash
+mvn clean test        # unitarios; no necesitan Docker
+mvn verify -Pit       # integración: Testcontainers, o infraestructura ya levantada
+```
+
+Los tests de integración se llaman `*IT.java` y los ejecuta failsafe, de modo que `mvn test`
+nunca depende de Docker. Si Testcontainers no puede hablar con el demonio local, se les puede
+indicar una infraestructura existente:
+
+```bash
+OSF_IT_JDBC_URL=jdbc:postgresql://localhost:5432/osf \
+OSF_IT_KAFKA_BOOTSTRAP=localhost:9092 mvn verify -Pit
+```
+
+## Estado
+
+| Fase | Estado |
+|---|---|
+| 1–5 Fundación, dominios, motor, Kafka, serializadores | Completado |
+| 6b Dominio de franquicias (Burger King, McDonald's) | Completado |
+| 8 CLI interactivo | Completado (modo batch por YAML en la fase 9) |
+| 11–13 Persistencia con patrón Outbox | Completado |
+| 14 Relay del outbox | Completado |
+| 15 CDC con Debezium | Completado |
+| 16 Selección de destino (Kafka / Outbox / Dual) | Completado |
+| 6 Dominios energy, autos y highway | Pendiente |
+| 7 Integración con IA | Pendiente |
+| 9 Configuración y perfiles YAML | Pendiente |
+| 10 Distribución y empaquetado | Pendiente |
+
+El plan completo, con el detalle de cada fase y sus criterios de aceptación, está en
+[`OmniStreamForce-PLAN.md`](OmniStreamForce-PLAN.md).
