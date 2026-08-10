@@ -56,7 +56,9 @@ public class GenerationEngine {
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        paused.set(false);
+        // No se toca aqui el estado de pausa: MultiDomainEngine arranca cada dominio en otro
+        // hilo, asi que una pausa pedida entre el alta y el arranque se perderia. El flag lo
+        // limpia stop().
         long deadlineMs = config.isUnlimited() ? Long.MAX_VALUE : System.currentTimeMillis() + config.durationSeconds() * 1000;
         scheduler.start(() -> tick(deadlineMs));
     }
@@ -73,6 +75,9 @@ public class GenerationEngine {
         if (running.compareAndSet(true, false)) {
             scheduler.stop();
         }
+        // se limpia siempre, incluso si el arranque asincrono aun no habia corrido,
+        // para que un start() posterior publique en vez de quedarse pausado
+        paused.set(false);
     }
 
     private void tick(long deadlineMs) {
@@ -176,6 +181,15 @@ public class GenerationEngine {
 
     public void setEventsPerSecond(int eps) {
         scheduler.setEventsPerSecond(eps);
+    }
+
+    /** Ritmo objetivo actual, que puede diferir del configurado si se ajusto en caliente. */
+    public int currentEventsPerSecond() {
+        return scheduler.getTargetEPS();
+    }
+
+    public double currentErrorRate() {
+        return currentErrorRate;
     }
 
     public void setErrorRate(double errorRate) {

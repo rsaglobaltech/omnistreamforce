@@ -29,11 +29,17 @@ public class PublishingDashboard {
     private final long startedAtMs = System.currentTimeMillis();
 
     private Thread refresher;
+    private PublishingControls controls;
 
     public PublishingDashboard(MultiDomainEngine engine, ConsoleRenderer console, long durationSeconds) {
         this.engine = engine;
         this.console = console;
         this.durationSeconds = durationSeconds;
+    }
+
+    /** Los controles se pintan en el panel: estado actual y ultima accion aplicada. */
+    public void bindControls(PublishingControls controls) {
+        this.controls = controls;
     }
 
     public void start() {
@@ -80,8 +86,10 @@ public class PublishingDashboard {
      * Render completo del panel. Es puro: mismas estadisticas, mismo texto.
      */
     public String render(MultiDomainEngine.AggregateStats stats, long elapsedSeconds) {
+        boolean paused = controls != null && controls.isPaused();
         StringBuilder sb = new StringBuilder();
-        sb.append("OmniStreamForce - publicando").append(System.lineSeparator());
+        sb.append("OmniStreamForce - ").append(paused ? "PAUSADO" : "publicando")
+                .append(System.lineSeparator());
         sb.append("Tiempo: ").append(elapsedSeconds).append("s");
         if (durationSeconds > 0) {
             sb.append(" / ").append(durationSeconds).append("s  ")
@@ -124,7 +132,13 @@ public class PublishingDashboard {
                 .append(ConsoleRenderer.humanize(stats.totalBytes())).append(" bytes")
                 .append(System.lineSeparator());
         sb.append(System.lineSeparator());
-        sb.append("[P] pausar  [R] reanudar  [S] parar  [Q] salir").append(System.lineSeparator());
+        sb.append("[P] pausar  [R] reanudar  [+/-] ritmo  [E <n>] tasa de error  [S] parar  [Q] salir")
+                .append(System.lineSeparator());
+        // el terminal entrega la entrada por lineas: sin Enter el comando no llega
+        sb.append("(escribe la letra y pulsa Enter)").append(System.lineSeparator());
+        if (controls != null && !controls.lastAction().isEmpty()) {
+            sb.append("Ultima accion: ").append(controls.lastAction()).append(System.lineSeparator());
+        }
         return sb.toString();
     }
 }

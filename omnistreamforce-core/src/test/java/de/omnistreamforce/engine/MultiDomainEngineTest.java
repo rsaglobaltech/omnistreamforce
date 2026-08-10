@@ -18,6 +18,55 @@ class MultiDomainEngineTest {
         }
     }
 
+    /**
+     * addDomain arranca cada dominio en otro hilo. Una pausa pedida justo despues del alta no
+     * puede perderse cuando ese arranque se ejecute.
+     */
+    @Test
+    void pauseRequestedRightAfterAddingSurvivesTheAsyncStart() throws InterruptedException {
+        RecordingPublisher publisher = new RecordingPublisher();
+        engine = new MultiDomainEngine(null, publisher);
+
+        engine.addDomain(new StubDomainGenerator("alpha"),
+                new GenerationConfig("alpha", "alpha-events", "alpha-errors",
+                        500, 0, PublishingMode.STEADY, 0, KeyStrategy.RANDOM, "entityId", 0, 0),
+                new TopicMapping("alpha", "alpha-events", "alpha-errors", 1, (short) 1, false));
+        engine.pauseAll();
+
+        Thread.sleep(300);
+        // pausar no deshace lo ya publicado, pero el contador debe dejar de crecer
+        long afterPause = publisher.totalPublished();
+        Thread.sleep(500);
+
+        assertThat(engine.getEngine("alpha").isPaused()).isTrue();
+        assertThat(publisher.totalPublished()).isEqualTo(afterPause);
+
+        engine.resumeAll();
+        Thread.sleep(400);
+        assertThat(publisher.totalPublished()).isGreaterThan(afterPause);
+    }
+
+    @Test
+    void stopClearsThePauseSoARestartPublishesAgain() throws InterruptedException {
+        RecordingPublisher publisher = new RecordingPublisher();
+        engine = new MultiDomainEngine(null, publisher);
+
+        StubDomainGenerator generator = new StubDomainGenerator("alpha");
+        GenerationConfig config = new GenerationConfig("alpha", "alpha-events", "alpha-errors",
+                300, 0, PublishingMode.STEADY, 0, KeyStrategy.RANDOM, "entityId", 0, 0);
+        engine.addDomain(generator, config,
+                new TopicMapping("alpha", "alpha-events", "alpha-errors", 1, (short) 1, false));
+
+        GenerationEngine domainEngine = engine.getEngine("alpha");
+        domainEngine.pause();
+        domainEngine.stop();
+        assertThat(domainEngine.isPaused()).isFalse();
+
+        domainEngine.start();
+        Thread.sleep(400);
+        assertThat(publisher.totalPublished()).isPositive();
+    }
+
     @Test
     void publishesToMultipleTopicsInParallel() throws InterruptedException {
         RecordingPublisher publisher = new RecordingPublisher();

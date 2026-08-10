@@ -4,6 +4,7 @@ import de.omnistreamforce.cli.cluster.KafkaClusterGateway;
 import de.omnistreamforce.cli.console.ConsoleRenderer;
 import de.omnistreamforce.cli.console.Prompter;
 import de.omnistreamforce.cli.interactive.InteractiveSession;
+import de.omnistreamforce.cli.interactive.PublishingControls;
 import de.omnistreamforce.cli.interactive.PublishingDashboard;
 import de.omnistreamforce.cli.interactive.SessionPlan;
 import de.omnistreamforce.domain.DomainGenerator;
@@ -36,10 +37,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 )
 public class InteractiveCommand implements Callable<Integer> {
 
+    /**
+     * Un unico lector para toda la sesion.
+     * <p>
+     * Es importante que las preguntas y los controles del panel compartan el mismo
+     * {@link BufferedReader}: con dos lectores distintos sobre {@code System.in}, el buffer del
+     * primero se queda con los bytes que venian detras y los comandos del panel no llegan nunca.
+     */
+    private final BufferedReader input = new BufferedReader(
+            new InputStreamReader(System.in, StandardCharsets.UTF_8));
+
     @Override
     public Integer call() {
         ConsoleRenderer console = new ConsoleRenderer();
-        Prompter prompt = new Prompter();
+        Prompter prompt = new Prompter(input, System.out);
         DomainRegistry registry = new DomainRegistry();
 
         InteractiveSession session = new InteractiveSession(prompt, console, registry,
@@ -105,7 +116,7 @@ public class InteractiveCommand implements Callable<Integer> {
         }
 
         dashboard.start();
-        awaitEnd(console, engine, plan.durationSeconds());
+        awaitEnd(console, engine, plan.durationSeconds(), dashboard);
 
         try {
             Runtime.getRuntime().removeShutdownHook(hook);
@@ -124,9 +135,13 @@ public class InteractiveCommand implements Callable<Integer> {
      * sin haber publicado nada. Con duracion fijada se espera a que el motor la agote; sin ella,
      * hasta que el usuario pulse S o Q.
      */
-    private void awaitEnd(ConsoleRenderer console, MultiDomainEngine engine, long durationSeconds) {
+    private void awaitEnd(ConsoleRenderer console, MultiDomainEngine engine, long durationSeconds,
+                          PublishingDashboard dashboard) {
         CountDownLatch stopRequested = new CountDownLatch(1);
-        Thread controls = new Thread(() -> readControls(console, engine, stopRequested), "osf-cli-controls");
+        PublishingControls publishingControls = new PublishingControls(engine, input, stopRequested);
+        dashboard.bindControls(publishingControls);
+
+        Thread controls = new Thread(publishingControls, "osf-cli-controls");
         controls.setDaemon(true);
         controls.start();
 
@@ -140,32 +155,6 @@ public class InteractiveCommand implements Callable<Integer> {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-    }
-
-    /** Bucle de teclado; termina con S o Q, o cuando se agota la entrada. */
-    private void readControls(ConsoleRenderer console, MultiDomainEngine engine,
-                              CountDownLatch stopRequested) {
-        try {
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(System.in, StandardCharsets.UTF_8));
-            String line;
-            while ((line = in.readLine()) != null) {
-                switch (line.trim().toLowerCase(Locale.ROOT)) {
-                    case "p" -> engine.pauseAll();
-                    case "r" -> engine.resumeAll();
-                    case "s", "q" -> {
-                        stopRequested.countDown();
-                        return;
-                    }
-                    default -> {
-                        // cualquier otra tecla solo refresca el panel
-                    }
-                }
-            }
-        } catch (Exception e) {
-            console.error("Error leyendo la entrada: " + e.getMessage());
-        }
-        // entrada agotada (tuberia cerrada): no se fuerza la parada, manda la duracion
     }
 
     private void printSummary(ConsoleRenderer console, MultiDomainEngine engine) {
