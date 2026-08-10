@@ -1268,11 +1268,35 @@ Utilizando el proyecto OmniStreamForce, completa la distribucion y documentacion
 
 ---
 
-### FASE 14: Outbox Relay propio (pendiente)
+### FASE 14: Outbox Relay propio
 
-Polling con `FOR UPDATE SKIP LOCKED` ordenado por `seq`, republicacion reutilizando
-`KafkaEventPublisher`, `flush()` antes de marcar (at-least-once), reintentos con `attempts`/
-`FAILED`, purga periodica y metrica de `lagSeconds`.
+**Objetivo**: Sacar las filas del outbox hacia Kafka sin depender de un conector externo.
+
+**Prompt**:
+```
+1. OutboxRelay: reclama lotes con FOR UPDATE SKIP LOCKED ordenados por seq, deserializa el
+   payload, reinyecta metadata["kafka.key"] con el aggregateid y republica reutilizando el
+   KafkaEventPublisher existente.
+2. At-least-once explicito: publish() + flush() ANTES de marcar las filas. Si el proceso muere
+   entre ambas cosas las filas siguen PENDING y se reenvian; el consumidor deduplica por
+   eventId. La granularidad de fallo es de lote, comparando el contador de fallos del publisher
+   antes y despues del flush.
+3. Reintentos: attempts++ y last_error; al llegar a maxAttempts la fila queda FAILED y se
+   contabiliza como dead letter.
+4. Orden: workerThreads=1 por defecto (ORDER BY seq da orden total). Con mas workers se aplica
+   sharding por hash del aggregateid, de modo que un mismo agregado va siempre al mismo worker
+   y el orden se conserva hasta la particion.
+5. Polling adaptativo (lote lleno -> repoll inmediato; vacio -> backoff exponencial), purga de
+   filas publicadas y muestreo de lagSeconds.
+6. RelayLauncher con main() y shutdown hook para ejecutarlo como proceso aparte.
+```
+
+**Criterios de Aceptacion**:
+- Todas las filas PENDING acaban en Kafka y quedan PUBLISHED
+- Dos relays sobre la misma tabla no duplican ni un mensaje
+- La clave del record es el aggregateid guardado, aunque el publisher use otra estrategia
+- Los eventos de error conservan su topic
+- `deleteAfterPublish` deja la tabla vacia
 
 ### FASE 15: CDC con Debezium (pendiente)
 
@@ -1435,7 +1459,7 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 11   | Fundacion de persistencia y endurecimiento concurrente | Completado |
 | 12   | DDL generado desde EventSchema | Completado |
 | 13   | JdbcOutboxPublisher (negocio + outbox transaccional) | Completado |
-| 14   | Outbox Relay propio (polling) | Pendiente |
+| 14   | Outbox Relay propio (polling) | Completado |
 | 15   | CDC con Debezium | Pendiente |
 | 16   | Seleccion de sink (KAFKA / DB_OUTBOX / DUAL) | Pendiente |
 
@@ -1499,6 +1523,16 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
   backpressure, circuito, concurrencia) + 9 de integracion contra PostgreSQL 16 real
   (500 eventos -> 500 filas de negocio y 500 de outbox, idempotencia, atomicidad con rollback de
   todo el lote, `payload_extra`, consulta de deriva de esquema, multi-dominio, indices).
+
+**Fase 14 - Outbox Relay**
+- `OutboxRelay` con reclamo `FOR UPDATE SKIP LOCKED`, republicacion sobre `KafkaEventPublisher`,
+  `flush()` antes de marcar, `attempts`/`FAILED`, sharding por agregado, polling adaptativo,
+  purga y `lagSeconds`. `RelayConfig`, `RelayStats` y `RelayLauncher` (proceso aparte).
+- Tests: 10 unitarios con outbox y publisher simulados (orden publish -> flush -> marcar, no se
+  marca nada si el publisher falla, dead letters, DELETE vs UPDATE, sharding) y 6 de integracion
+  contra PostgreSQL y Kafka reales (300 filas -> 300 mensajes y 0 PENDING; **dos relays a la vez
+  sin un solo duplicado**; la clave del record es el `aggregateid` aunque el publisher use
+  RANDOM; los eventos de error conservan su topic; `deleteAfterPublish` vacia la tabla).
 
 ### Verificacion rapida
 - `mvn clean test` -> BUILD SUCCESS (todos los modulos, sin Docker).
