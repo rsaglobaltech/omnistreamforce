@@ -1,0 +1,43 @@
+# Los tres dominios a la vez, cada uno a su topic y con su propio ritmo.
+kafka:
+  clusterType: LOCAL
+  bootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+  clientId: omnistreamforce-multi
+
+domains:
+  - domain: fastfood
+    topic: fastfood-events
+    errorTopic: fastfood-errors
+    eventsPerSecond: 120
+    errorRate: 15
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+  - domain: ecommerce
+    topic: ecommerce-orders
+    errorTopic: ecommerce-errors
+    eventsPerSecond: 50
+    errorRate: 10
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+  - domain: healthcare
+    topic: healthcare-events
+    errorTopic: healthcare-alerts
+    eventsPerSecond: 20
+    errorRate: 5
+    keyStrategy: ENTITY_ID
+    keyField: patientId
+
+generation:
+  publishingMode: STEADY
+  durationSeconds: 0
+
+serialization:
+  format: JSON
+
+sink:
+  type: KAFKA
+
+topic:
+  partitions: 3
+  replicationFactor: 1
+  autoCreate: true

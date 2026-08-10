@@ -1,0 +1,37 @@
+# AWS MSK con autenticacion IAM. Las credenciales salen del entorno o de la cadena de
+# credenciales de AWS: nunca se escriben aqui.
+kafka:
+  clusterType: MSK
+  bootstrapServers: ${MSK_BOOTSTRAP_SERVERS}
+  securityProtocol: SASL_SSL
+  saslMechanism: AWS_MSK_IAM
+  saslJaasConfig: software.amazon.msk.auth.iam.IAMLoginModule required;
+  clientId: omnistreamforce-msk
+  acks: all
+  extra:
+    sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+    aws.region: ${AWS_REGION:-us-east-1}
+
+domains:
+  - domain: fastfood
+    topic: fastfood-events
+    errorTopic: fastfood-errors
+    eventsPerSecond: 100
+    errorRate: 10
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+
+generation:
+  publishingMode: STEADY
+  durationSeconds: 0
+
+serialization:
+  format: JSON
+
+sink:
+  type: KAFKA
+
+topic:
+  partitions: 3
+  replicationFactor: 3
+  autoCreate: false

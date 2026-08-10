@@ -1,0 +1,40 @@
+# Escribe en Kafka y en PostgreSQL a la vez: los eventos quedan en la tabla de negocio y en el
+# outbox, listos para que los saque el relay o Debezium. Encaja con docker/docker-compose.yml.
+kafka:
+  clusterType: LOCAL
+  bootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:19092}
+  clientId: omnistreamforce-dual
+
+domains:
+  - domain: fastfood
+    topic: fastfood-events
+    errorTopic: fastfood-errors
+    eventsPerSecond: 100
+    errorRate: 15
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+
+generation:
+  publishingMode: STEADY
+  durationSeconds: 0
+
+serialization:
+  format: JSON
+
+sink:
+  type: DUAL
+  jdbcUrl: ${OSF_DB_URL:-jdbc:postgresql://localhost:55433/osf}
+  username: ${OSF_DB_USER:-osf}
+  password: ${OSF_DB_PASSWORD:-osf}
+  outboxTable: osf_outbox
+  batchSize: 100
+  lingerMs: 20
+  writerThreads: 2
+  backpressure: BLOCK
+  writeBusinessTable: true
+  tablePrefix: osf_
+
+topic:
+  partitions: 3
+  replicationFactor: 1
+  autoCreate: true

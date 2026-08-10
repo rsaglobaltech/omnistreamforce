@@ -1,0 +1,29 @@
+# Flujo clinico sostenido con pocos errores.
+kafka:
+  clusterType: LOCAL
+  bootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+  clientId: omnistreamforce-healthcare
+
+domains:
+  - domain: healthcare
+    topic: healthcare-events
+    errorTopic: healthcare-alerts
+    eventsPerSecond: 100
+    errorRate: 5
+    keyStrategy: ENTITY_ID
+    keyField: patientId
+
+generation:
+  publishingMode: STEADY
+  durationSeconds: 0
+
+serialization:
+  format: JSON
+
+sink:
+  type: KAFKA
+
+topic:
+  partitions: 3
+  replicationFactor: 1
+  autoCreate: true

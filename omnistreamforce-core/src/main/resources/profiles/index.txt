@@ -1,0 +1,9 @@
+# Perfiles empaquetados. Los recursos de un jar no se pueden listar, asi que este
+# indice es lo que ProfileLoader usa para saber cuales existen.
+development
+fastfood-burst
+healthcare-fast
+ecommerce-spike
+multi-domain
+aws-msk-iam
+outbox-dual

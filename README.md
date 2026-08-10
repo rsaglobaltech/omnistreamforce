@@ -57,10 +57,53 @@ Paso 3: Dominios y mapeo a topics
 | Comando | Para qué |
 |---|---|
 | `interactive` | Flujo guiado completo y dashboard en vivo |
+| `batch --profile <p>` / `--config <f>` | Ejecución sin interacción, para CI o dejarlo corriendo |
+| `list-profiles [<p>] [--yaml]` | Perfiles disponibles y su detalle |
 | `connect -b <servers>` | Valida el acceso a un cluster y lista sus topics |
 | `list-domains [-d]` | Dominios disponibles; con `-d`, también sus campos |
 | `web [-p 8080]` | Interfaz web |
 | `help` | Ayuda |
+
+En el panel de publicación: `P` pausa, `R` reanuda, `+`/`-` ajustan el ritmo, `E <n>` cambia la
+tasa de error y `S` para. Cada comando se confirma con Enter.
+
+## Configuración y perfiles
+
+Todo lo que pregunta el flujo interactivo cabe en un YAML, y hay siete perfiles listos:
+
+```bash
+java -jar omnistreamforce-cli/target/omnistreamforce-cli.jar list-profiles
+java -jar ...jar batch --profile multi-domain --dry-run --duration 10
+java -jar ...jar batch --profile outbox-dual --duration 60 --eps 200
+java -jar ...jar batch --config mi-config.yaml
+```
+
+`--dry-run` genera con los generadores reales y estima el volumen **sin abrir ninguna conexión**.
+`--duration` y `--eps` sobrescriben lo que traiga el perfil.
+
+```yaml
+kafka:
+  bootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+domains:
+  - domain: fastfood
+    topic: fastfood-events
+    errorTopic: fastfood-errors
+    eventsPerSecond: 120
+    errorRate: 15
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+generation:
+  publishingMode: STEADY      # STEADY | BURST | SPIKE | RAMP
+  durationSeconds: 0          # 0 = sin límite
+sink:
+  type: DUAL                  # KAFKA | DB_OUTBOX | DUAL
+  jdbcUrl: ${OSF_DB_URL:-jdbc:postgresql://localhost:55433/osf}
+  password: ${OSF_DB_PASSWORD}
+```
+
+Los valores admiten `${VAR}`, `${env:VAR}` y `${VAR:-por-defecto}`, así que las credenciales no
+se escriben en el fichero. Los perfiles propios se buscan en `~/.omnistreamforce/profiles/` y en
+`./config/profiles/`, y ganan al perfil de fábrica del mismo nombre.
 
 ## Dominios
 
@@ -171,15 +214,15 @@ OSF_IT_KAFKA_BOOTSTRAP=localhost:9092 mvn verify -Pit
 |---|---|
 | 1–5 Fundación, dominios, motor, Kafka, serializadores | Completado |
 | 6b Dominio de franquicias (Burger King, McDonald's) | Completado |
-| 8 CLI interactivo | Completado (modo batch por YAML en la fase 9) |
+| 8 CLI interactivo | Completado |
 | 11–13 Persistencia con patrón Outbox | Completado |
 | 14 Relay del outbox | Completado |
 | 15 CDC con Debezium | Completado |
 | 16 Selección de destino (Kafka / Outbox / Dual) | Completado |
+| 9 Configuración YAML, perfiles y modo batch | Completado |
 | 6 Dominios energy, autos y highway | Pendiente |
 | 7 Integración con IA | Pendiente |
-| 9 Configuración y perfiles YAML | Pendiente |
 | 10 Distribución y empaquetado | Pendiente |
 
 El plan completo, con el detalle de cada fase y sus criterios de aceptación, está en
-[`OmniStreamForce-PLAN.md`](OmniStreamForce-PLAN.md).
+[`docs/OmniStreamForce-PLAN.md`](docs/OmniStreamForce-PLAN.md).

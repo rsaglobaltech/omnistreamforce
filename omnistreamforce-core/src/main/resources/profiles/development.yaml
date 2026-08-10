@@ -1,0 +1,30 @@
+# Ritmo bajo y muchos errores: para desarrollar consumidores y ver casos raros enseguida.
+kafka:
+  clusterType: LOCAL
+  bootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+  clientId: omnistreamforce-dev
+
+domains:
+  - domain: fastfood
+    topic: fastfood-events
+    errorTopic: fastfood-errors
+    eventsPerSecond: 5
+    errorRate: 50
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+
+generation:
+  publishingMode: STEADY
+  durationSeconds: 0
+
+serialization:
+  format: JSON
+  prettyPrint: true
+
+sink:
+  type: KAFKA
+
+topic:
+  partitions: 1
+  replicationFactor: 1
+  autoCreate: true

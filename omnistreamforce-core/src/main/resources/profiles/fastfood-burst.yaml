@@ -1,0 +1,30 @@
+# Rafagas de pedidos: simula las horas punta de las franquicias.
+kafka:
+  clusterType: LOCAL
+  bootstrapServers: ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
+  clientId: omnistreamforce-fastfood
+
+domains:
+  - domain: fastfood
+    topic: fastfood-events
+    errorTopic: fastfood-errors
+    eventsPerSecond: 500
+    errorRate: 15
+    keyStrategy: ENTITY_ID
+    keyField: orderId
+
+generation:
+  publishingMode: BURST
+  burstSize: 500
+  durationSeconds: 0
+
+serialization:
+  format: JSON
+
+sink:
+  type: KAFKA
+
+topic:
+  partitions: 6
+  replicationFactor: 1
+  autoCreate: true

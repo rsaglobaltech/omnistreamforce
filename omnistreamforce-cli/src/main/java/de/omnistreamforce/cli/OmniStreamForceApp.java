@@ -18,8 +18,10 @@ import java.time.Year;
                 CommandLine.HelpCommand.class,
                 WebCommand.class,
                 de.omnistreamforce.cli.commands.InteractiveCommand.class,
+                de.omnistreamforce.cli.commands.BatchCommand.class,
                 de.omnistreamforce.cli.commands.ConnectCommand.class,
-                de.omnistreamforce.cli.commands.ListDomainsCommand.class
+                de.omnistreamforce.cli.commands.ListDomainsCommand.class,
+                de.omnistreamforce.cli.commands.ListProfilesCommand.class
         },
         headerHeading = "%n",
         synopsisHeading = "%nUso: ",
