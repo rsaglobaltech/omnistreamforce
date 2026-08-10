@@ -1,8 +1,9 @@
 package de.omnistreamforce.engine;
 
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.DoubleAdder;
 
@@ -21,20 +22,14 @@ public class GenerationStats {
     private final AtomicLong lastWindowStartMs = new AtomicLong(System.currentTimeMillis());
     private final DoubleAdder latencyMs = new DoubleAdder();
     private final AtomicLong latencyCount = new AtomicLong();
-    private final Map<String, TopicStats> perTopic = new HashMap<>();
+    private final Map<String, TopicAccumulator> perTopic = new ConcurrentHashMap<>();
 
     public void recordEvent(String topic, boolean error, double latency, long bytes) {
         totalEvents.incrementAndGet();
         totalSent.incrementAndGet();
         totalBytes.addAndGet(Math.max(0, bytes));
         lastWindowEvents.incrementAndGet();
-        perTopic.compute(topic, (k, v) -> new TopicStats(
-                (v == null ? 0 : v.totalSent()) + 1,
-                (v == null ? 0 : v.totalAcknowledged()) + 1,
-                (v == null ? 0 : v.totalFailed()),
-                (v == null ? 0 : v.totalErrors()) + (error ? 1 : 0),
-                v == null ? 0.0 : v.avgLatencyMs()
-        ));
+        accumulator(topic).recordEvent(error, latency);
         if (error) {
             totalErrors.incrementAndGet();
         }
@@ -45,13 +40,11 @@ public class GenerationStats {
     }
 
     public void recordFailure(String topic) {
-        perTopic.compute(topic, (k, v) -> new TopicStats(
-                (v == null ? 0 : v.totalSent()) + 1,
-                (v == null ? 0 : v.totalAcknowledged()),
-                (v == null ? 0 : v.totalFailed()) + 1,
-                (v == null ? 0 : v.totalErrors()),
-                v == null ? 0.0 : v.avgLatencyMs()
-        ));
+        accumulator(topic).recordFailure();
+    }
+
+    private TopicAccumulator accumulator(String topic) {
+        return perTopic.computeIfAbsent(topic, k -> new TopicAccumulator());
     }
 
     /**
@@ -72,8 +65,14 @@ public class GenerationStats {
                 eps,
                 now - startTimeMs,
                 avgLatency,
-                Map.copyOf(perTopic)
+                perTopicSnapshot()
         );
+    }
+
+    private Map<String, TopicStats> perTopicSnapshot() {
+        Map<String, TopicStats> snapshot = new LinkedHashMap<>();
+        perTopic.forEach((topic, accumulator) -> snapshot.put(topic, accumulator.snapshot()));
+        return snapshot;
     }
 
     /**
@@ -82,6 +81,46 @@ public class GenerationStats {
     public void tickWindow() {
         lastWindowEvents.set(0);
         lastWindowStartMs.set(System.currentTimeMillis());
+    }
+
+    /**
+     * Acumulador mutable y thread-safe de las metricas de un topic.
+     * La media de latencia se calcula al tomar el snapshot, no en cada evento.
+     */
+    private static final class TopicAccumulator {
+        private final AtomicLong sent = new AtomicLong();
+        private final AtomicLong acknowledged = new AtomicLong();
+        private final AtomicLong failed = new AtomicLong();
+        private final AtomicLong errors = new AtomicLong();
+        private final DoubleAdder latencySum = new DoubleAdder();
+        private final AtomicLong latencyCount = new AtomicLong();
+
+        void recordEvent(boolean error, double latency) {
+            sent.incrementAndGet();
+            acknowledged.incrementAndGet();
+            if (error) {
+                errors.incrementAndGet();
+            }
+            if (latency > 0) {
+                latencySum.add(latency);
+                latencyCount.incrementAndGet();
+            }
+        }
+
+        void recordFailure() {
+            sent.incrementAndGet();
+            failed.incrementAndGet();
+        }
+
+        TopicStats snapshot() {
+            long count = latencyCount.get();
+            return new TopicStats(
+                    sent.get(),
+                    acknowledged.get(),
+                    failed.get(),
+                    errors.get(),
+                    count > 0 ? latencySum.sum() / count : 0.0);
+        }
     }
 
     public record Snapshot(

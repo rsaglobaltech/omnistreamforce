@@ -713,6 +713,50 @@ Cada generador debe:
 
 ---
 
+### FASE 6b: Dominio de Franquicias de Comida Rapida (Fast Food)
+
+**Objetivo**: Anadir un dominio de franquicias de comida rapida (Burger King, McDonald's y futuras marcas) modelando la franquicia como un campo del payload, de modo que todas las marcas compartan topic y anadir una nueva no requiera un modulo nuevo.
+
+**Prompt**:
+```
+Utilizando el proyecto OmniStreamForce, implementa el dominio fastfood en omnistreamforce-domains/fastfood siguiendo el patron de la Fase 2.
+
+1. de.omnistreamforce.domain.fastfood.FastFoodBrand (enum):
+   - Constantes: BURGER_KING, MCDONALDS (extensible: anadir una constante basta)
+   - Cada marca aporta: displayName, code (prefijo corto de ids: BK, MCD), menu (List<MenuItem>) e ingredients (List<Ingredient>)
+   - Records anidados: MenuItem(sku, name, basePrice, category), Ingredient(sku, name, unit)
+   - Helpers: names() para exponer las marcas como enum del EventSchema, from(String) para resolver marca por nombre o codigo
+
+2. de.omnistreamforce.domain.fastfood.FastFoodGenerator extends AbstractDomainGenerator:
+   - domain = "fastfood"; la marca viaja en el payload como campo brand
+   - Constructor sin argumentos (todas las marcas) y constructor con List<FastFoodBrand> para restringir a una franquicia concreta
+   Eventos normales (13):
+   - Pedidos y cocina: OrderPlaced, OrderPaid, KitchenPrepStarted, OrderReady, OrderDelivered
+   - Drive-thru y canales: DriveThruArrival, DriveThruOrder, KioskOrder, AppOrder, DeliveryDispatched
+   - Inventario de tienda: InventoryUpdated, StockReplenished, WasteRecorded
+   Eventos de error (8):
+   - Pedido/cocina: PaymentDeclined, ItemOutOfStock, KitchenDelay, WrongOrderDelivered
+   - Canal: DriveThruTimeout, DeliveryFailed
+   - Inventario: IngredientOutOfStock, ColdChainBreach
+   - Payload de tienda: brand, brandName, storeId, storeCity, country, currency
+   - Payload de pedido: orderId, channel, items (sku/name/category/quantity/unitPrice/lineTotal), itemCount, totalAmount, paymentMethod, orderStatus, employeeId
+   - Payload de inventario: ingredientSku, ingredientName, unit, quantityOnHand, reorderLevel
+   - Errores coherentes: KitchenDelay supera el SLA de cocina (300s), DriveThruTimeout supera el umbral de espera (900s), IngredientOutOfStock deja quantityOnHand=0 con blockedItems, ColdChainBreach supera el umbral de -18 C con severidad CRITICAL
+
+3. Registro SPI en META-INF/services/de.omnistreamforce.domain.DomainGenerator
+4. Modulo declarado en omnistreamforce-domains/pom.xml, dependencyManagement del parent y dependencia del CLI
+5. Tests unitarios: esquema completo, marcas expuestas como enum, todos los eventos normales y de error, coherencia de totales e importes, restriccion a una sola franquicia, descubrimiento via ServiceLoader
+```
+
+**Criterios de Aceptacion**:
+- FastFoodGenerator genera eventos realistas de Burger King y McDonald's
+- La franquicia se identifica en el payload (brand/brandName) y en los ids (storeId, orderId)
+- Anadir una franquicia nueva solo requiere una constante en FastFoodBrand
+- Eventos de error coherentes con sus umbrales (SLA, timeout, stock, cadena de frio)
+- Tests unitarios pasan
+
+---
+
 ### FASE 7: Integracion con IA (LLM)
 
 **Objetivo**: Implementar la integracion con LLM para proponer esquemas de eventos para dominios personalizados y generar datos realistas.
@@ -1269,6 +1313,7 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 4    | Integracion con Kafka Producer | Completado (tests IT se omiten sin Docker-TC; pasan en CI) |
 | 5    | Serializadores multi-formato | Completado |
 | 6    | Dominios adicionales (energy, autos, highway) | Pendiente |
+| 6b   | Dominio de franquicias de comida rapida (Burger King, McDonald's) | Completado |
 | 7    | Integracion con IA (LLM) | Pendiente |
 | 8    | CLI interactivo completo | Pendiente |
 | 9    | Sistema de configuracion y perfiles | Pendiente |
@@ -1299,10 +1344,22 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 **Fase 4 - Integracion Kafka (commit `431c1ad`)**
 - kafka: ClusterType, KafkaConnectionConfig (builder, props producer/admin), MskClusterConfig (IAM y SCRAM-SHA-512, toKafkaProps sin AWS), KafkaConnectionManager (AutoCloseable, producer + admin, describeCluster, connect), ClusterInfo, KafkaEventPublisher (asincrono con callbacks, key strategies RANDOM/ENTITY_ID/ROUND_ROBIN, metricas, retry configurable), KafkaTopicManager (list/listWithPartitions/create/verifyOrCreate/getTopicInfo), TopicInfo.
 - Tests: MskClusterConfigTest (3 OK, props IAM/SCRAM verificadas sin AWS). KafkaIntegrationTest con Testcontainers (6 escenarios) que se omite limpiamente si Docker/Testcontainers no detectable localmente; correran en CI Linux.
+- Correcciones posteriores (detectadas en la prueba end-to-end contra un broker real):
+  * `KafkaEventPublisher.Metrics` no tenia el desglose `perTopicStats` que pedia la fase; ahora acumula por topic (enviados, ack, fallidos, reintentos) con la latencia media real medida en el callback del producer. Nuevo `KafkaEventPublisherTest` con MockProducer (5 tests).
+  * `GenerationStats` nunca calculaba `avgLatencyMs` por topic (siempre 0.0) y usaba un `HashMap` mutado desde virtual threads mientras `snapshot()` lo copiaba. Ahora usa un acumulador thread-safe por topic sobre `ConcurrentHashMap`. Nuevo `GenerationStatsTest` (4 tests, incluye snapshot concurrente).
+  * `ClusterInfo.kafkaVersion` quedaba a null (se leia el `rack` del controlador). Ahora se resuelve el nivel de `metadata.version` via `describeFeatures()`, se devuelve "unknown" cuando no esta disponible y se expone ademas `controllerId`.
 
 **Fase 5 - Serializadores (commit `dc4a7d5`)**
 - serializer: JsonEventSerializer (pretty-print configurable, timestamp ISO-8601 o epoch con deserializador leniente), AvroEventSerializer (schema estatico, payload como JSON string, round-trip), ProtobufEventSerializer (Struct well-known, binario real, round-trip), SerializerFactory (JSON/AVRO/PROTOBUF).
 - Tests round-trip + factory: 12 tests OK. Total core: 37 tests.
+
+**Fase 6b - Dominio fastfood (franquicias)**
+- Modulo nuevo `omnistreamforce-domains/fastfood` (artifactId `omnistreamforce-domain-fastfood`), declarado en el agregador de dominios, en el dependencyManagement del parent y como dependencia del CLI.
+- `FastFoodBrand` (enum): BURGER_KING y MCDONALDS con carta (MenuItem) e ingredientes (Ingredient) propios; anadir una franquicia = anadir una constante.
+- `FastFoodGenerator` (domain `fastfood`): 13 eventos normales (pedidos/cocina, drive-thru y canales, inventario) y 8 de error; la marca viaja en el payload (`brand`, `brandName`) y en los ids (`storeId`, `orderId` con prefijo BK/MCD). Constructor opcional con lista de marcas para publicar solo una franquicia.
+- Errores con umbrales coherentes: KitchenDelay > SLA 300s, DriveThruTimeout > 900s, IngredientOutOfStock con `quantityOnHand=0` + `blockedItems`, ColdChainBreach sobre -18 C con severidad CRITICAL.
+- Registro SPI; 23 tests OK (incluye descubrimiento via DomainRegistry/ServiceLoader).
+- Prueba end-to-end contra un broker Kafka real (apache/kafka 3.8.0 en Docker, 200 evt/s durante 8s, errorRate 15%, KeyStrategy ENTITY_ID sobre orderId): 1600 eventos enviados, 1600 ack, 0 fallidos, latencia media ~17 ms. Consumidos de vuelta: routing normal/error correcto (1352 en `fastfood-events`, 248 en `fastfood-errors`), tasa de error observada 15,5%, key del record == payload.orderId en el 100%, ambas franquicias presentes y los 8 tipos de error representados.
 
 ### Verificacion rapida
 - `mvn clean test` -> BUILD SUCCESS (todos los modulos).

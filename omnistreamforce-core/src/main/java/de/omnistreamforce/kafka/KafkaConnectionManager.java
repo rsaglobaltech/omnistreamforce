@@ -3,6 +3,8 @@ package de.omnistreamforce.kafka;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
+import org.apache.kafka.clients.admin.FeatureMetadata;
+import org.apache.kafka.clients.admin.FinalizedVersionRange;
 import org.apache.kafka.clients.admin.ListTopicsOptions;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.Node;
@@ -58,7 +60,7 @@ public class KafkaConnectionManager implements AutoCloseable {
     }
 
     /**
-     * Describe el cluster (brokers, version, id).
+     * Describe el cluster (brokers, version de metadata, id y controlador).
      */
     private ClusterInfo describeCluster() {
         try {
@@ -68,16 +70,35 @@ public class KafkaConnectionManager implements AutoCloseable {
             for (Node node : result.nodes().get()) {
                 brokers.add(node.host() + ":" + node.port());
             }
-            String version = result.controller().get() != null
-                    ? String.valueOf(result.controller().get().rack())
-                    : "unknown";
-            return new ClusterInfo(config.clusterType(), clusterId, brokers, version);
+            Node controller = result.controller().get();
+            return new ClusterInfo(config.clusterType(), clusterId, brokers,
+                    resolveKafkaVersion(), controller == null ? -1 : controller.id());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("DescribeCluster interrumpido", e);
         } catch (ExecutionException e) {
             throw new RuntimeException("No se pudo describir el cluster", e.getCause());
         }
+    }
+
+    /**
+     * El AdminClient no expone la version del broker; lo mas cercano es el nivel de
+     * {@code metadata.version} finalizado en el cluster (KRaft). Si no esta disponible
+     * (cluster con ZooKeeper o broker antiguo) se devuelve "unknown" en vez de null.
+     */
+    private String resolveKafkaVersion() {
+        try {
+            FeatureMetadata features = admin.describeFeatures().featureMetadata().get();
+            FinalizedVersionRange metadataVersion = features.finalizedFeatures().get("metadata.version");
+            if (metadataVersion != null) {
+                return "metadata.version " + metadataVersion.maxVersionLevel();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | RuntimeException e) {
+            log.debug("No se pudo determinar la version del cluster: {}", e.getMessage());
+        }
+        return "unknown";
     }
 
     public Producer<String, byte[]> producer() {

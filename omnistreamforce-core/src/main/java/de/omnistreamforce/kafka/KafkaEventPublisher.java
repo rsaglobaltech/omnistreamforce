@@ -3,6 +3,7 @@ package de.omnistreamforce.kafka;
 import de.omnistreamforce.core.Event;
 import de.omnistreamforce.engine.EventPublisher;
 import de.omnistreamforce.engine.KeyStrategy;
+import de.omnistreamforce.engine.TopicStats;
 import de.omnistreamforce.serializer.EventSerializer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -10,8 +11,11 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.DoubleAdder;
 
@@ -141,23 +145,50 @@ public class KafkaEventPublisher implements EventPublisher {
         private final AtomicLong totalRetries = new AtomicLong();
         private final DoubleAdder latencyMs = new DoubleAdder();
         private final AtomicLong latencyCount = new AtomicLong();
+        private final Map<String, TopicAccumulator> perTopic = new ConcurrentHashMap<>();
 
         void recordSent(String topic) {
             totalSent.incrementAndGet();
+            accumulator(topic).recordSent();
         }
 
         void recordAck(String topic, double latencyMs2) {
             totalAcknowledged.incrementAndGet();
             latencyMs.add(latencyMs2);
             latencyCount.incrementAndGet();
+            accumulator(topic).recordAck(latencyMs2);
         }
 
         void recordFailure(String topic) {
             totalFailed.incrementAndGet();
+            accumulator(topic).recordFailure();
         }
 
         void recordRetry(String topic) {
             totalRetries.incrementAndGet();
+            accumulator(topic).recordRetry();
+        }
+
+        private TopicAccumulator accumulator(String topic) {
+            return perTopic.computeIfAbsent(topic, k -> new TopicAccumulator());
+        }
+
+        /**
+         * Metricas desglosadas por topic, con la latencia media real medida en el callback
+         * del producer (envio -> acuse del broker).
+         */
+        public Map<String, TopicStats> perTopicStats() {
+            Map<String, TopicStats> snapshot = new LinkedHashMap<>();
+            perTopic.forEach((topic, accumulator) -> snapshot.put(topic, accumulator.snapshot()));
+            return snapshot;
+        }
+
+        /**
+         * Reintentos acumulados para un topic concreto.
+         */
+        public long retriesFor(String topic) {
+            TopicAccumulator accumulator = perTopic.get(topic);
+            return accumulator == null ? 0L : accumulator.retries.get();
         }
 
         public long totalSent() {
@@ -179,6 +210,49 @@ public class KafkaEventPublisher implements EventPublisher {
         public double avgLatencyMs() {
             long c = latencyCount.get();
             return c > 0 ? latencyMs.sum() / c : 0.0;
+        }
+
+        /**
+         * Acumulador mutable y thread-safe por topic: los callbacks del producer
+         * llegan desde el hilo de I/O de Kafka, no desde el hilo que publica.
+         */
+        private static final class TopicAccumulator {
+            private final AtomicLong sent = new AtomicLong();
+            private final AtomicLong acknowledged = new AtomicLong();
+            private final AtomicLong failed = new AtomicLong();
+            private final AtomicLong retries = new AtomicLong();
+            private final DoubleAdder latencySum = new DoubleAdder();
+            private final AtomicLong latencyCount = new AtomicLong();
+
+            void recordSent() {
+                sent.incrementAndGet();
+            }
+
+            void recordAck(double latency) {
+                acknowledged.incrementAndGet();
+                if (latency > 0) {
+                    latencySum.add(latency);
+                    latencyCount.incrementAndGet();
+                }
+            }
+
+            void recordFailure() {
+                failed.incrementAndGet();
+            }
+
+            void recordRetry() {
+                retries.incrementAndGet();
+            }
+
+            TopicStats snapshot() {
+                long count = latencyCount.get();
+                return new TopicStats(
+                        sent.get(),
+                        acknowledged.get(),
+                        failed.get(),
+                        0,
+                        count > 0 ? latencySum.sum() / count : 0.0);
+            }
         }
     }
 }
