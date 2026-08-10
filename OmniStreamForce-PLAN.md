@@ -1304,10 +1304,29 @@ Utilizando el proyecto OmniStreamForce, completa la distribucion y documentacion
 `osf_outbox` con `EventRouter`, `skipped.operations=u,d,t` para que los UPDATE del relay no se
 reemitan, y `route.topic.replacement=cdc.${routedByValue}`.
 
-### FASE 16: Seleccion de sink (pendiente)
+### FASE 16: Seleccion de sink
 
-`CompositePublisher` en core y `PublisherFactory.create(SinkConfig)` con KAFKA / DB_OUTBOX /
-DUAL. La firma de `MultiDomainEngine` y `GenerationEngine` no cambia.
+**Objetivo**: Elegir destino sin cambiar la API del motor.
+
+**Prompt**:
+```
+1. CompositePublisher (core): publica en todos los delegados aunque alguno falle, acumulando
+   errores. FAIL_FAST relanza el primero con los demas como suppressed (y el motor lo cuenta
+   como fallo); CONTINUE solo avisa. close() cierra todos pase lo que pase.
+2. SinkType KAFKA | DB_OUTBOX | DUAL, SinkConfig y PublisherFactory.create(...), que devuelve un
+   ManagedPublisher: ademas de publicar, se hace cargo de la conexion a Kafka y del pool JDBC,
+   de modo que MultiDomainEngine.shutdown() lo libere todo con su unica llamada a close().
+   El orden de cierre importa: los publishers antes que el pool, o el sink de base de datos se
+   queda sin conexiones para drenar su cola.
+3. La clave del mensaje se resuelve igual en los dos caminos (metadata del motor -> keyField ->
+   eventId), para que un evento tenga la misma clave salga por donde salga.
+```
+
+**Criterios de Aceptacion**:
+- `new MultiDomainEngine(serializer, PublisherFactory.create(config))` sin cambios de firma
+- En DUAL cada evento acaba en Kafka y en las dos tablas
+- KAFKA no toca la base de datos y DB_OUTBOX no publica nada
+- La clave del record de Kafka coincide con `message_key` de la tabla
 
 ---
 
@@ -1461,7 +1480,7 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 13   | JdbcOutboxPublisher (negocio + outbox transaccional) | Completado |
 | 14   | Outbox Relay propio (polling) | Completado |
 | 15   | CDC con Debezium | Pendiente |
-| 16   | Seleccion de sink (KAFKA / DB_OUTBOX / DUAL) | Pendiente |
+| 16   | Seleccion de sink (KAFKA / DB_OUTBOX / DUAL) | Completado |
 
 ### Notas de Avance por Fase
 
@@ -1533,6 +1552,21 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
   contra PostgreSQL y Kafka reales (300 filas -> 300 mensajes y 0 PENDING; **dos relays a la vez
   sin un solo duplicado**; la clave del record es el `aggregateid` aunque el publisher use
   RANDOM; los eventos de error conservan su topic; `deleteAfterPublish` vacia la tabla).
+
+**Fase 16 - Seleccion de sink**
+- `CompositePublisher` (core, fichero nuevo; `engine/` no se toca por lo demas) y
+  `SinkType`/`SinkConfig`/`PublisherFactory` en persistencia. El motor sigue recibiendo un
+  `EventPublisher` y su firma no cambia.
+- Dos defectos que solo aparecieron al probar el modo DUAL end-to-end:
+  * `ManagedPublisher.close()` cerraba los recursos en orden inverso y dejaba al sink de base de
+    datos sin pool para drenar su cola (de 500 eventos solo llegaban 30). Ahora se cierran en
+    orden de registro: publishers primero, pool despues.
+  * La clave del mensaje divergia entre caminos: Kafka usaba `keyField` y el outbox caia a
+    `eventId`. `OutboxRecordMapper` aplica ahora la misma estrategia y la clave se calcula una
+    sola vez por evento para la fila de negocio y la de outbox.
+- Tests: 8 unitarios de `CompositePublisher` y 4 de integracion de `DualSinkIT` (DUAL escribe en
+  Kafka y en las dos tablas; KAFKA no crea ninguna tabla; DB_OUTBOX no publica nada; la clave
+  coincide en ambos caminos).
 
 ### Verificacion rapida
 - `mvn clean test` -> BUILD SUCCESS (todos los modulos, sin Docker).

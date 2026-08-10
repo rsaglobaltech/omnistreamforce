@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.omnistreamforce.core.Event;
 import de.omnistreamforce.core.EventSchema;
 import de.omnistreamforce.engine.EventPublisher;
+import de.omnistreamforce.engine.KeyStrategy;
 import de.omnistreamforce.persistence.PersistenceConfig;
 import de.omnistreamforce.persistence.PersistenceException;
 import de.omnistreamforce.persistence.PersistenceUnavailableException;
@@ -51,6 +52,10 @@ public final class JdbcOutboxPublisher implements EventPublisher, AutoCloseable 
     private record PendingWrite(Event event, String topic) {
     }
 
+    /** Evento con su fila de outbox ya calculada, para no resolver la clave dos veces. */
+    private record PreparedWrite(PendingWrite write, OutboxRecord record) {
+    }
+
     private final DataSource dataSource;
     private final SqlDialect dialect;
     private final PersistenceConfig config;
@@ -75,11 +80,25 @@ public final class JdbcOutboxPublisher implements EventPublisher, AutoCloseable 
                                PersistenceConfig config,
                                EventSerializer serializer,
                                Function<String, EventSchema> schemaCatalog) {
+        this(dataSource, dialect, config, serializer, schemaCatalog, KeyStrategy.RANDOM, null);
+    }
+
+    /**
+     * @param keyStrategy y {@code keyField} deben coincidir con los del publisher de Kafka para
+     *                    que un evento tenga la misma clave salga por donde salga
+     */
+    public JdbcOutboxPublisher(DataSource dataSource,
+                               SqlDialect dialect,
+                               PersistenceConfig config,
+                               EventSerializer serializer,
+                               Function<String, EventSchema> schemaCatalog,
+                               KeyStrategy keyStrategy,
+                               String keyField) {
         this.dataSource = dataSource;
         this.dialect = dialect;
         this.config = config;
         this.schemaCatalog = schemaCatalog;
-        this.recordMapper = new OutboxRecordMapper(serializer);
+        this.recordMapper = new OutboxRecordMapper(serializer, keyStrategy, keyField);
         ObjectMapper objectMapper = new ObjectMapper();
         this.binder = new PayloadBinder(dialect, objectMapper);
         this.ddlExecutor = new DdlExecutor(dataSource, dialect,
@@ -260,7 +279,11 @@ public final class JdbcOutboxPublisher implements EventPublisher, AutoCloseable 
      * Una transaccion por lote: filas de negocio y filas de outbox entran o no entran juntas.
      */
     private void writeBatch(List<PendingWrite> batch) throws SQLException {
-        Map<String, List<PendingWrite>> byDomain = groupByDomain(batch);
+        List<PreparedWrite> prepared = new ArrayList<>(batch.size());
+        for (PendingWrite write : batch) {
+            prepared.add(new PreparedWrite(write, recordMapper.toRecord(write.event(), write.topic())));
+        }
+        Map<String, List<PreparedWrite>> byDomain = groupByDomain(prepared);
         // preparar el DDL fuera de la transaccion del lote, para no retenerla mientras se crea
         Map<String, TableModel> tables = new LinkedHashMap<>();
         if (config.writeBusinessTable()) {
@@ -273,11 +296,11 @@ public final class JdbcOutboxPublisher implements EventPublisher, AutoCloseable 
             connection.setAutoCommit(false);
             try {
                 if (config.writeBusinessTable()) {
-                    for (Map.Entry<String, List<PendingWrite>> entry : byDomain.entrySet()) {
+                    for (Map.Entry<String, List<PreparedWrite>> entry : byDomain.entrySet()) {
                         writeBusinessRows(connection, tables.get(entry.getKey()), entry.getValue());
                     }
                 }
-                writeOutboxRows(connection, batch);
+                writeOutboxRows(connection, prepared);
                 connection.commit();
             } catch (SQLException | RuntimeException e) {
                 connection.rollback();
@@ -289,31 +312,33 @@ public final class JdbcOutboxPublisher implements EventPublisher, AutoCloseable 
         }
     }
 
-    private Map<String, List<PendingWrite>> groupByDomain(List<PendingWrite> batch) {
-        Map<String, List<PendingWrite>> byDomain = new LinkedHashMap<>();
-        for (PendingWrite write : batch) {
-            byDomain.computeIfAbsent(write.event().domain(), d -> new ArrayList<>()).add(write);
+    private Map<String, List<PreparedWrite>> groupByDomain(List<PreparedWrite> batch) {
+        Map<String, List<PreparedWrite>> byDomain = new LinkedHashMap<>();
+        for (PreparedWrite prepared : batch) {
+            byDomain.computeIfAbsent(prepared.write().event().domain(), d -> new ArrayList<>())
+                    .add(prepared);
         }
         return byDomain;
     }
 
-    private void writeBusinessRows(Connection connection, TableModel table, List<PendingWrite> writes)
+    private void writeBusinessRows(Connection connection, TableModel table, List<PreparedWrite> writes)
             throws SQLException {
         String sql = insertSqlCache.computeIfAbsent(table.tableName(), name ->
                 dialect.insertIgnoreConflict(name, table.columnNames(), DdlGenerator.COL_EVENT_ID));
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
-            for (PendingWrite write : writes) {
-                binder.bind(statement, table, write.event(), write.topic());
+            for (PreparedWrite prepared : writes) {
+                binder.bind(statement, table, prepared.write().event(), prepared.write().topic(),
+                        prepared.record().aggregateId());
                 statement.addBatch();
             }
             statement.executeBatch();
         }
     }
 
-    private void writeOutboxRows(Connection connection, List<PendingWrite> batch) throws SQLException {
+    private void writeOutboxRows(Connection connection, List<PreparedWrite> batch) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(dialect.insertOutbox(config.outboxTable()))) {
-            for (PendingWrite write : batch) {
-                OutboxRecord record = recordMapper.toRecord(write.event(), write.topic());
+            for (PreparedWrite prepared : batch) {
+                OutboxRecord record = prepared.record();
                 statement.setString(1, record.id());
                 statement.setString(2, record.aggregateType());
                 statement.setString(3, record.aggregateId());

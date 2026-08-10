@@ -47,11 +47,11 @@ public final class PayloadBinder {
     /**
      * Enlaza todas las columnas de la tabla en el orden de {@link TableModel#allColumns()}.
      */
-    public void bind(PreparedStatement statement, TableModel table, Event event, String topic)
-            throws SQLException {
+    public void bind(PreparedStatement statement, TableModel table, Event event, String topic,
+                     String messageKey) throws SQLException {
         int index = 1;
         for (ColumnModel column : table.envelope()) {
-            bindEnvelope(statement, index++, column, event, topic);
+            bindEnvelope(statement, index++, column, event, topic, messageKey);
         }
         Map<String, Object> payload = event.payload() == null ? Map.of() : event.payload();
         for (ColumnModel column : table.payloadColumns()) {
@@ -63,7 +63,7 @@ public final class PayloadBinder {
     }
 
     private void bindEnvelope(PreparedStatement statement, int index, ColumnModel column,
-                              Event event, String topic) throws SQLException {
+                              Event event, String topic, String messageKey) throws SQLException {
         switch (column.name()) {
             case DdlGenerator.COL_EVENT_ID -> statement.setString(index, event.eventId());
             case "event_type" -> statement.setString(index, event.eventType());
@@ -79,7 +79,8 @@ public final class PayloadBinder {
             case "severity" -> statement.setString(index, OutboxRecordMapper.metadata(event, "severity"));
             case "error_code" -> statement.setString(index, OutboxRecordMapper.metadata(event, "errorCode"));
             case "error_message" -> statement.setString(index, OutboxRecordMapper.metadata(event, "errorMessage"));
-            case "message_key" -> statement.setString(index, OutboxRecordMapper.aggregateId(event));
+            // la misma clave que lleva la fila de outbox y que llevara el mensaje en Kafka
+            case "message_key" -> statement.setString(index, messageKey);
             case "topic" -> statement.setString(index, topic);
             default -> statement.setNull(index, Types.VARCHAR);
         }
