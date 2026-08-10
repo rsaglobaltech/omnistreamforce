@@ -48,6 +48,10 @@
             <groupId>de.omnistreamforce</groupId>
             <artifactId>omnistreamforce-domain-fastfood</artifactId>
         </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-web</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>info.picocli</groupId>

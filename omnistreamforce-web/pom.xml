@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>de.omnistreamforce</groupId>
+        <artifactId>omnistreamforce-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>omnistreamforce-web</artifactId>
+
+    <properties>
+        <javalin.version>6.1.3</javalin.version>
+    </properties>
+
+    <dependencies>
+        <!-- Internal -->
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-ai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-persistence</artifactId>
+        </dependency>
+        <!-- Domain Modules -->
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-domain-healthcare</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-domain-ecommerce</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-domain-energy</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-domain-autos</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-domain-highway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-domain-fastfood</artifactId>
+        </dependency>
+
+        <!-- Javalin for Web Server -->
+        <dependency>
+            <groupId>io.javalin</groupId>
+            <artifactId>javalin</artifactId>
+            <version>${javalin.version}</version>
+        </dependency>
+
+        <!-- Jackson for JSON (already managed in parent) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+        </dependency>
+    </dependencies>
+</project>

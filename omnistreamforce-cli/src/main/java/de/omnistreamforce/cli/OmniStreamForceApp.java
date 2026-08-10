@@ -15,7 +15,8 @@ import java.time.Year;
         version = "OmniStreamForce 1.0.0-SNAPSHOT",
         description = "Generador de datos configurable y adaptable para Apache Kafka con soporte multi-dominio, multi-topic y multi-plataforma potenciado por IA.",
         subcommands = {
-                CommandLine.HelpCommand.class
+                CommandLine.HelpCommand.class,
+                WebCommand.class
         },
         headerHeading = "%n",
         synopsisHeading = "%nUso: ",

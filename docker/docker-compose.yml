@@ -1,0 +1,115 @@
+# Stack de CDC para OmniStreamForce: PostgreSQL con replicacion logica, Kafka en KRaft y
+# Debezium Connect. Levanta lo minimo para ver el patron Outbox de punta a punta.
+#
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker/register-connector.ps1     (o .sh en Linux/macOS)
+#
+# Los puertos estan desplazados a proposito (55433 / 19092) para no chocar con instalaciones
+# locales de PostgreSQL o Kafka que ya esten escuchando en los puertos por defecto.
+name: omnistreamforce-cdc
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: osf-cdc-postgres
+    environment:
+      POSTGRES_DB: osf
+      POSTGRES_USER: osf
+      POSTGRES_PASSWORD: osf
+    # sin wal_level=logical Debezium no puede leer el WAL y el conector no arranca
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    ports:
+      - "55433:5432"
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - osf-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osf -d osf"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: osf-cdc-kafka
+    ports:
+      - "19092:19092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@osf-cdc-kafka:9093
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:19092
+      # dos listeners: los contenedores usan INTERNAL, tu maquina usa EXTERNAL
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://osf-cdc-kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: osf-cdc-connect
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: osf-cdc-kafka:9092
+      GROUP_ID: osf-connect
+      CONFIG_STORAGE_TOPIC: osf_connect_configs
+      OFFSET_STORAGE_TOPIC: osf_connect_offsets
+      STATUS_STORAGE_TOPIC: osf_connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      # sin esto cada mensaje arrastraria el schema de Connect y dejaria de ser el Event limpio
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # Interfaz web opcional para inspeccionar topics y mensajes:
+  #   docker compose -f docker/docker-compose.yml --profile tools up -d
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: osf-cdc-kafka-ui
+    profiles: ["tools"]
+    depends_on:
+      - kafka
+      - connect
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: osf-cdc
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: osf-cdc-kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://osf-cdc-connect:8083
+      DYNAMIC_CONFIG_ENABLED: "true"
+
+volumes:
+  osf-pgdata:
