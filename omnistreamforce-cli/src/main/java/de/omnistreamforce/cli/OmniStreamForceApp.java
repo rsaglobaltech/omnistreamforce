@@ -21,7 +21,8 @@ import java.time.Year;
                 de.omnistreamforce.cli.commands.BatchCommand.class,
                 de.omnistreamforce.cli.commands.ConnectCommand.class,
                 de.omnistreamforce.cli.commands.ListDomainsCommand.class,
-                de.omnistreamforce.cli.commands.ListProfilesCommand.class
+                de.omnistreamforce.cli.commands.ListProfilesCommand.class,
+                de.omnistreamforce.cli.commands.ProposeSchemaCommand.class
         },
         headerHeading = "%n",
         synopsisHeading = "%nUso: ",

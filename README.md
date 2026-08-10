@@ -61,6 +61,7 @@ Paso 3: Dominios y mapeo a topics
 | `list-profiles [<p>] [--yaml]` | Perfiles disponibles y su detalle |
 | `connect -b <servers>` | Valida el acceso a un cluster y lista sus topics |
 | `list-domains [-d]` | Dominios disponibles; con `-d`, también sus campos |
+| `propose-schema <dominio>` | Propone con IA el esquema de un dominio nuevo |
 | `web [-p 8080]` | Interfaz web |
 | `help` | Ayuda |
 
@@ -186,6 +187,26 @@ Detalles y verificación paso a paso en [`docker/README.md`](docker/README.md).
 El relay y el CDC pueden convivir publicando a topics distintos (`fastfood-events` y
 `cdc.fastfood-events`), lo que permite compararlos sin duplicar nada.
 
+## Dominios propuestos por IA
+
+Para un dominio que no existe todavía, un modelo puede proponer el esquema y el generador lo
+convierte en eventos publicables:
+
+```bash
+# con Ollama en local (sin credenciales)
+java -jar ...jar propose-schema logistics -d "paquetería urbana con entregas en el día"
+
+# con OpenAI
+OSF_AI_API_KEY=sk-... java -jar ...jar propose-schema logistics --provider openai --model gpt-4o-mini
+```
+
+`SchemaBackedGenerator` convierte **cualquier** `EventSchema` en un `DomainGenerator` usable por
+el motor, así que el dominio propuesto se publica igual que los escritos a mano. Funciona también
+con esquemas propios, sin IA de por medio.
+
+La IA es siempre opcional: si no está configurada o no responde, el comando lo dice y el resto del
+generador sigue funcionando igual.
+
 ## Módulos
 
 ```
@@ -194,7 +215,7 @@ omnistreamforce-domains       un submódulo por dominio (healthcare, ecommerce, 
 omnistreamforce-persistence   sink de base de datos, generación de DDL, outbox y relay
 omnistreamforce-cli           interfaz de línea de comandos
 omnistreamforce-web           interfaz web
-omnistreamforce-ai            integración con LLM (pendiente)
+omnistreamforce-ai            propuesta de esquemas con LLM (OpenAI y Ollama)
 ```
 
 ## Tests
@@ -226,7 +247,7 @@ OSF_IT_KAFKA_BOOTSTRAP=localhost:9092 mvn verify -Pit
 | 16 Selección de destino (Kafka / Outbox / Dual) | Completado |
 | 9 Configuración YAML, perfiles y modo batch | Completado |
 | 6 Dominios energy, autos y highway | Completado |
-| 7 Integración con IA | Pendiente |
+| 7 Integración con IA (OpenAI y Ollama) | Completado |
 | 10 Distribución y empaquetado | Pendiente |
 
 El plan completo, con el detalle de cada fase y sus criterios de aceptación, está en

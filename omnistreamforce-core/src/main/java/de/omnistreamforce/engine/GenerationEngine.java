@@ -90,6 +90,11 @@ public class GenerationEngine {
         }
         int tokens = scheduler.tokensForTick();
         for (int i = 0; i < tokens; i++) {
+            // se comprueba en cada evento, no solo al entrar: un tick puede llevar cientos de
+            // eventos y parar o pausar tiene que surtir efecto de inmediato
+            if (!running.get() || paused.get()) {
+                return;
+            }
             produceEvent();
         }
         stats.tickWindow();
