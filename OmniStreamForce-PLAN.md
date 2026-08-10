@@ -1298,11 +1298,34 @@ Utilizando el proyecto OmniStreamForce, completa la distribucion y documentacion
 - Los eventos de error conservan su topic
 - `deleteAfterPublish` deja la tabla vacia
 
-### FASE 15: CDC con Debezium (pendiente)
+### FASE 15: CDC con Debezium
 
-`docker/` con PostgreSQL (`wal_level=logical`), Kafka y Debezium Connect; conector sobre
-`osf_outbox` con `EventRouter`, `skipped.operations=u,d,t` para que los UPDATE del relay no se
-reemitan, y `route.topic.replacement=cdc.${routedByValue}`.
+**Objetivo**: Sacar los eventos del outbox leyendo el WAL, sin que la aplicacion participe.
+
+**Prompt**:
+```
+1. docker/docker-compose.yml con PostgreSQL (wal_level=logical, max_replication_slots,
+   max_wal_senders), Kafka en KRaft con listener interno y externo, y Debezium Connect.
+   Kafka UI opcional bajo el perfil "tools". Puertos desplazados (55433/19092) para no chocar
+   con instalaciones locales.
+2. docker/postgres/init/01-osf-outbox.sql crea la tabla outbox de antemano para que el conector
+   pueda arrancar antes de que el generador escriba nada.
+3. Conector PostgresConnector sobre public.osf_outbox con el SMT EventRouter:
+   - route.by.field=aggregatetype (que aqui ES el topic) y route.topic.replacement=cdc.${...}
+   - skipped.operations=u,d,t: el relay hace UPDATE sobre esas filas y sin esto cada UPDATE se
+     reemitiria como un evento duplicado
+   - table.expand.json.payload=true y schemas.enable=false: al topic va el Event limpio, no el
+     envelope before/after/op/source
+   - table.fields.additional.placement para conservar domain, trace_id y created_at como headers
+4. Scripts de registro .sh y .ps1 usando PUT /config, que es idempotente.
+5. README con la verificacion end-to-end y el aviso del slot de replicacion.
+```
+
+**Criterios de Aceptacion**:
+- El conector queda RUNNING tras el script de registro
+- Los mensajes de `cdc.*` son el Event desenvuelto, con la clave del aggregateid y cabeceras
+- Los UPDATE del relay no generan mensajes adicionales
+- El mismo evento sale por relay y por CDC a topics distintos, sin duplicados
 
 ### FASE 16: Seleccion de sink
 
@@ -1479,7 +1502,7 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 12   | DDL generado desde EventSchema | Completado |
 | 13   | JdbcOutboxPublisher (negocio + outbox transaccional) | Completado |
 | 14   | Outbox Relay propio (polling) | Completado |
-| 15   | CDC con Debezium | Pendiente |
+| 15   | CDC con Debezium | Completado |
 | 16   | Seleccion de sink (KAFKA / DB_OUTBOX / DUAL) | Completado |
 
 ### Notas de Avance por Fase
@@ -1567,6 +1590,17 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 - Tests: 8 unitarios de `CompositePublisher` y 4 de integracion de `DualSinkIT` (DUAL escribe en
   Kafka y en las dos tablas; KAFKA no crea ninguna tabla; DB_OUTBOX no publica nada; la clave
   coincide en ambos caminos).
+
+**Fase 15 - CDC con Debezium**
+- `docker/` con compose (PostgreSQL `wal_level=logical` en 55433, Kafka KRaft en 19092, Debezium
+  Connect 2.7.3 en 8083, Kafka UI opcional), DDL inicial del outbox, conector con `EventRouter` y
+  scripts de registro `.sh`/`.ps1` idempotentes (`PUT /config`).
+- Verificado end-to-end contra el stack real: 50 eventos escritos por el sink producen 50 filas
+  de negocio y 50 de outbox; Debezium publica los 50 en `cdc.<topic>` con el **Event desenvuelto**
+  (no el envelope de Debezium), la clave es el `aggregateid` (`ORD-BK-14978795`) y las cabeceras
+  traen `id`, `eventType`, `domain`, `traceId` y `createdAt`. Al arrancar despues el relay, este
+  publica los 50 en el topic normal y el topic `cdc.*` **sigue teniendo 50**: `skipped.operations`
+  evita que los UPDATE del relay se reemitan.
 
 ### Verificacion rapida
 - `mvn clean test` -> BUILD SUCCESS (todos los modulos, sin Docker).
