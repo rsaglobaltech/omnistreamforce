@@ -52,6 +52,11 @@
             <groupId>de.omnistreamforce</groupId>
             <artifactId>omnistreamforce-web</artifactId>
         </dependency>
+        <!-- sink de base de datos: permite elegir destino DB_OUTBOX o DUAL desde el CLI -->
+        <dependency>
+            <groupId>de.omnistreamforce</groupId>
+            <artifactId>omnistreamforce-persistence</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>info.picocli</groupId>

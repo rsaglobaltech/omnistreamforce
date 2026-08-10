@@ -1495,7 +1495,7 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 6    | Dominios adicionales (energy, autos, highway) | Pendiente |
 | 6b   | Dominio de franquicias de comida rapida (Burger King, McDonald's) | Completado |
 | 7    | Integracion con IA (LLM) | Pendiente |
-| 8    | CLI interactivo completo | Pendiente |
+| 8    | CLI interactivo completo | Completado (batch YAML queda para la Fase 9) |
 | 9    | Sistema de configuracion y perfiles | Pendiente |
 | 10   | Docker, distribucion y documentacion | Pendiente |
 | 11   | Fundacion de persistencia y endurecimiento concurrente | Completado |
@@ -1601,6 +1601,27 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
   traen `id`, `eventType`, `domain`, `traceId` y `createdAt`. Al arrancar despues el relay, este
   publica los 50 en el topic normal y el topic `cdc.*` **sigue teniendo 50**: `skipped.operations`
   evita que los UPDATE del relay se reemitan.
+
+**Fase 8 - CLI interactivo**
+- `console/`: `ConsoleRenderer` (tablas con anchos calculados, colores ANSI solo si el terminal
+  los admite, barra de progreso, formateo K/M) y `Prompter` (valor por defecto, validacion con
+  reintento, menus numerados y seleccion multiple). Ambos con entrada y salida inyectables.
+- `cluster/ClusterGateway`: lo que el flujo necesita del cluster detras de una interfaz, para
+  poder probar la conversacion entera sin broker.
+- `interactive/InteractiveSession`: los cinco pasos (conexion local/MSK/Confluent, topics del
+  cluster, dominios y mapeo con creacion de topics al vuelo, destino Kafka/DB/DUAL reutilizando
+  la Fase 16, y configuracion global) devolviendo un `SessionPlan` que es un valor puro.
+- `interactive/PublishingDashboard`: panel en vivo por dominio y por topic, con totales, barra de
+  progreso y controles; el render esta separado del refresco y se prueba con datos fabricados.
+- Comandos `interactive`, `connect` y `list-domains`, sumados a los que ya existian.
+- Banner nuevo, legible, que degrada a ASCII puro si la salida no es UTF-8.
+- Un detalle que solo aparecio al probar el binario: con la entrada no interactiva (una tuberia)
+  el CLI terminaba antes de publicar nada. Ahora los controles de teclado corren en un hilo
+  aparte y, si hay duracion fijada, se espera a que el motor la agote.
+- Tests: 33 en el modulo (prompts, render, dashboard y ocho recorridos completos de la sesion con
+  guion de respuestas y cluster de mentira). Verificado ademas con el fat JAR contra un broker
+  real: `list-domains`, `connect` y un `interactive` de 5 s a 50 evt/s que publico exactamente
+  250 eventos (25 de error) con la clave igual al `orderId`.
 
 ### Verificacion rapida
 - `mvn clean test` -> BUILD SUCCESS (todos los modulos, sin Docker).
