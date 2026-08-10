@@ -25,7 +25,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class KafkaIntegrationTest {
+/**
+ * Test de integracion (sufijo IT): lo ejecuta failsafe con {@code mvn verify -Pit}, no surefire.
+ */
+class KafkaIntegrationIT {
 
     private static KafkaContainer kafka;
     private static String bootstrap;
@@ -36,10 +39,12 @@ class KafkaIntegrationTest {
             kafka = new KafkaContainer("apache/kafka:3.7.0");
             kafka.start();
             bootstrap = kafka.getBootstrapServers();
-        } catch (IllegalStateException e) {
-            // Docker/Testcontainers no disponible en este entorno: se omiten los tests
+        } catch (RuntimeException e) {
+            // Docker/Testcontainers no disponible o no detectable en este entorno: se omiten los tests.
+            // No basta con IllegalStateException: en Windows la deteccion de estrategia puede fallar
+            // con InvalidPathException si el PATH contiene comillas.
             kafka = null;
-            Assumptions.assumeTrue(false, "Docker no disponible para Testcontainers: " + e.getMessage());
+            Assumptions.assumeTrue(false, "Docker no disponible para Testcontainers: " + e);
         }
     }
 

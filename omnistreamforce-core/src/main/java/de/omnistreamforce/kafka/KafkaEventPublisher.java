@@ -29,6 +29,9 @@ public class KafkaEventPublisher implements EventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaEventPublisher.class);
 
+    /** Clave de metadata donde el motor deja la clave ya resuelta por su KeyStrategy. */
+    static final String PRECOMPUTED_KEY_METADATA = "kafka.key";
+
     private final Producer<String, byte[]> producer;
     private final EventSerializer serializer;
     private final KeyStrategy keyStrategy;
@@ -116,7 +119,20 @@ public class KafkaEventPublisher implements EventPublisher {
         }
     }
 
+    /**
+     * Clave del record. Si el motor ya decidio la clave (la deja en {@code metadata["kafka.key"]}
+     * al aplicar la KeyStrategy configurada) se respeta, de modo que la clave sea la misma tanto
+     * si el evento va directo a Kafka como si pasa por el outbox y lo republica el relay.
+     * Sin esa metadata el comportamiento es el de siempre.
+     */
     private String resolveKey(Event event) {
+        Map<String, String> metadata = event.metadata();
+        if (metadata != null) {
+            String precomputed = metadata.get(PRECOMPUTED_KEY_METADATA);
+            if (precomputed != null && !precomputed.isBlank()) {
+                return precomputed;
+            }
+        }
         if (keyStrategy == KeyStrategy.ENTITY_ID && keyField != null) {
             Object field = event.payload().get(keyField);
             if (field != null) {
@@ -126,6 +142,11 @@ public class KafkaEventPublisher implements EventPublisher {
             return String.valueOf(roundRobin.incrementAndGet());
         }
         return UUID.randomUUID().toString();
+    }
+
+    @Override
+    public void flush() {
+        producer.flush();
     }
 
     @Override

@@ -24,6 +24,16 @@ public interface EventPublisher {
     }
 
     /**
+     * Fuerza el envio de todo lo que el publisher tenga pendiente y bloquea hasta que el
+     * destino lo confirme. Por defecto no hace nada (publisher sin buffer propio).
+     * <p>
+     * El relay del outbox depende de esto: solo marca una fila como publicada cuando el
+     * lote ha llegado realmente al destino.
+     */
+    default void flush() {
+    }
+
+    /**
      * Cierra el publisher liberando recursos.
      */
     void close();

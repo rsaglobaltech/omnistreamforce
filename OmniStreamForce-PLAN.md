@@ -1173,6 +1173,120 @@ Utilizando el proyecto OmniStreamForce, completa la distribucion y documentacion
 
 ---
 
+### FASE 11: Fundacion de persistencia y endurecimiento concurrente
+
+**Objetivo**: Preparar el core para un segundo sink de salida y crear el modulo de persistencia.
+
+**Prompt**:
+```
+1. Endurecer el core (defectos que la carga de persistencia hace visibles):
+   - ErrorInjector: el Set de tipos generados se comparte entre todos los dominios y se muta
+     desde N hilos -> ConcurrentHashMap.newKeySet(); la distribucion de severidad pasa a
+     volatile con reemplazo copy-on-write.
+   - DefaultTopicRouter: route() lee un HashMap sin sincronizar mientras addDomain() escribe
+     -> ConcurrentHashMap.
+   - KafkaEventPublisher.resolveKey(): respetar metadata["kafka.key"] que ya calculo el motor,
+     con la logica actual como fallback. Sin esto el relay no puede reproducir la clave.
+   - EventPublisher: anadir `default void flush() {}`; KafkaEventPublisher lo implementa con
+     producer.flush(). El relay lo necesita para marcar filas solo cuando el lote llego.
+
+2. Modulo nuevo omnistreamforce-persistence (no va en core: core es dependencia de los 6
+   modulos de dominio y no debe arrastrar JDBC). Dependencias: HikariCP, driver PostgreSQL.
+
+3. SqlDialect + PostgresDialect + DialectFactory.fromJdbcUrl(): todo lo especifico del motor
+   detras de una interfaz, para que anadir Oracle o MySQL sea una clase nueva.
+
+4. POM raiz: modulo nuevo, BOM de Testcontainers, maven-failsafe-plugin y perfil `it`. Los
+   tests de integracion pasan a llamarse *IT.java y no los ejecuta surefire: `mvn test` deja
+   de necesitar Docker.
+```
+
+**Criterios de Aceptacion**:
+- `mvn clean test` verde y sin tocar Docker
+- Tests de concurrencia de ErrorInjector y DefaultTopicRouter
+- La clave precalculada por el motor llega al record de Kafka
+
+---
+
+### FASE 12: DDL generado desde EventSchema
+
+**Objetivo**: Derivar la tabla de negocio de cada dominio de su propio esquema de eventos.
+
+**Prompt**:
+```
+1. TypeMapper: string/enum -> TEXT, int -> BIGINT, double -> DOUBLE PRECISION (o NUMERIC(18,4)
+   si el nombre sugiere dinero), array/object/desconocido -> JSONB. Reconocer por adelantado
+   datetime/boolean/decimal para cuando los esquemas los genere un LLM.
+2. NameMapper: camelCase -> snake_case, truncado al limite del dialecto con desambiguacion,
+   y prefijo f_ para los campos que colisionan con el envelope.
+3. DdlGenerator: tabla por dominio (osf_<domain>_events) con tres bloques: envelope comun del
+   Event, una columna tipada por campo declarado, y overflow JSON (payload completo,
+   payload_extra con las claves NO declaradas, metadata).
+   - required=true NO se traduce a NOT NULL en columnas de payload: los dominios comparten la
+     misma lista de campos entre todos sus tipos de evento.
+   - alterStatements() solo emite ADD COLUMN IF NOT EXISTS; nunca DROP.
+4. DdlExecutor: crea tablas e indices bajo advisory lock y cachea las ya preparadas.
+5. Tests alimentados con los EventSchema reales de fastfood, healthcare y ecommerce.
+```
+
+**Criterios de Aceptacion**:
+- Los 6 tipos usados por los dominios mapean correctamente
+- payload_extra aisla exactamente las claves no declaradas
+- El DDL nunca contiene DROP
+
+---
+
+### FASE 13: JdbcOutboxPublisher (sink de negocio + outbox transaccional)
+
+**Objetivo**: Escribir cada evento como fila de negocio y fila de outbox en la misma transaccion.
+
+**Prompt**:
+```
+1. Tabla osf_outbox compatible con el SMT io.debezium.transforms.outbox.EventRouter
+   (id, aggregatetype, aggregateid, type, payload) mas seq/status/attempts/last_error/
+   created_at/published_at para el relay. Indice PARCIAL sobre status='PENDING', fillfactor 70
+   y autovacuum agresivo por el ciclo INSERT->UPDATE->DELETE.
+2. JdbcOutboxPublisher implements EventPublisher:
+   - publish() NO toca la base de datos: encola. El motor tiene ticks de 100 ms por dominio y
+     un INSERT sincrono por evento consumiria el presupuesto del tick.
+   - N hilos de PLATAFORMA (JDBC bloquea) que hacen micro-batching por tamano o por tiempo:
+     una transaccion por lote con las filas de negocio y las de outbox.
+   - aggregatetype = topic resuelto por el TopicRouter; la tabla se elige por domain.
+   - ON CONFLICT DO NOTHING sobre event_id: reintentar un lote entero es seguro.
+   - BackpressurePolicy BLOCK/DROP/FAIL y circuit breaker que hace visible el fallo asincrono.
+3. PayloadBinder con coercion defensiva: el tipo declarado es una pista; ante un valor
+   inconvertible la columna queda NULL y el dato sobrevive en payload.
+   event_ts siempre en UTC explicito, nunca java.sql.Timestamp.
+4. Tests unitarios con dobles JDBC (sin base de datos) e IT contra PostgreSQL real.
+```
+
+**Criterios de Aceptacion**:
+- Una transaccion por lote, no por evento
+- Un fallo en el INSERT de outbox deja 0 filas del lote en ambas tablas
+- Republicar los mismos eventos no duplica filas
+- El sink aguanta publish() concurrente desde varios dominios
+
+---
+
+### FASE 14: Outbox Relay propio (pendiente)
+
+Polling con `FOR UPDATE SKIP LOCKED` ordenado por `seq`, republicacion reutilizando
+`KafkaEventPublisher`, `flush()` antes de marcar (at-least-once), reintentos con `attempts`/
+`FAILED`, purga periodica y metrica de `lagSeconds`.
+
+### FASE 15: CDC con Debezium (pendiente)
+
+`docker/` con PostgreSQL (`wal_level=logical`), Kafka y Debezium Connect; conector sobre
+`osf_outbox` con `EventRouter`, `skipped.operations=u,d,t` para que los UPDATE del relay no se
+reemitan, y `route.topic.replacement=cdc.${routedByValue}`.
+
+### FASE 16: Seleccion de sink (pendiente)
+
+`CompositePublisher` en core y `PublisherFactory.create(SinkConfig)` con KAFKA / DB_OUTBOX /
+DUAL. La firma de `MultiDomainEngine` y `GenerationEngine` no cambia.
+
+---
+
 ## Diagrama de Dependencias entre Fases
 
 ```
@@ -1318,6 +1432,12 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 | 8    | CLI interactivo completo | Pendiente |
 | 9    | Sistema de configuracion y perfiles | Pendiente |
 | 10   | Docker, distribucion y documentacion | Pendiente |
+| 11   | Fundacion de persistencia y endurecimiento concurrente | Completado |
+| 12   | DDL generado desde EventSchema | Completado |
+| 13   | JdbcOutboxPublisher (negocio + outbox transaccional) | Completado |
+| 14   | Outbox Relay propio (polling) | Pendiente |
+| 15   | CDC con Debezium | Pendiente |
+| 16   | Seleccion de sink (KAFKA / DB_OUTBOX / DUAL) | Pendiente |
 
 ### Notas de Avance por Fase
 
@@ -1361,8 +1481,28 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
 - Registro SPI; 23 tests OK (incluye descubrimiento via DomainRegistry/ServiceLoader).
 - Prueba end-to-end contra un broker Kafka real (apache/kafka 3.8.0 en Docker, 200 evt/s durante 8s, errorRate 15%, KeyStrategy ENTITY_ID sobre orderId): 1600 eventos enviados, 1600 ack, 0 fallidos, latencia media ~17 ms. Consumidos de vuelta: routing normal/error correcto (1352 en `fastfood-events`, 248 en `fastfood-errors`), tasa de error observada 15,5%, key del record == payload.orderId en el 100%, ambas franquicias presentes y los 8 tipos de error representados.
 
+**Fases 11-13 - Persistencia con patron Outbox**
+- Core endurecido: `ErrorInjector` con set concurrente y distribucion copy-on-write,
+  `DefaultTopicRouter` sobre `ConcurrentHashMap`, `KafkaEventPublisher` respeta la clave que ya
+  calculo el motor (`metadata["kafka.key"]`) y `EventPublisher` gana `flush()` por defecto.
+  `GenerationEngine` y `MultiDomainEngine` no se han tocado.
+- Modulo nuevo `omnistreamforce-persistence` con `SqlDialect`/`PostgresDialect`, generacion de DDL
+  desde `EventSchema` (columnas tipadas + `payload`/`payload_extra`/`metadata` en JSONB) y
+  `JdbcOutboxPublisher`, que encola y escribe por lotes: una transaccion por lote con la fila de
+  negocio y la de outbox juntas.
+- Tests de integracion renombrados a `*IT.java` y movidos a failsafe (perfil `-Pit`): `mvn test`
+  ya no necesita Docker. Testcontainers actualizado a 1.20.6 porque la 1.19.x negocia la API
+  v1.32 de Docker, que Docker 29 rechaza con HTTP 400.
+- Los `*IT` aceptan `OSF_IT_JDBC_URL` para apuntar a un PostgreSQL ya levantado cuando
+  Testcontainers no puede hablar con el demonio local.
+- Tests: 41 unitarios en persistencia (DDL, nombres, drift, batching, transacciones, reintentos,
+  backpressure, circuito, concurrencia) + 9 de integracion contra PostgreSQL 16 real
+  (500 eventos -> 500 filas de negocio y 500 de outbox, idempotencia, atomicidad con rollback de
+  todo el lote, `payload_extra`, consulta de deriva de esquema, multi-dominio, indices).
+
 ### Verificacion rapida
-- `mvn clean test` -> BUILD SUCCESS (todos los modulos).
+- `mvn clean test` -> BUILD SUCCESS (todos los modulos, sin Docker).
+- `mvn verify -Pit` -> tests de integracion (Docker o `OSF_IT_JDBC_URL`).
 - `mvn -pl omnistreamforce-cli -am package -DskipTests` -> fat JAR funcional.
 - `java -jar omnistreamforce-cli/target/omnistreamforce-cli.jar` -> banner OK.
 

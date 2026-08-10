@@ -5,11 +5,13 @@ import de.omnistreamforce.core.Severity;
 import de.omnistreamforce.domain.DomainGenerator;
 import de.omnistreamforce.util.RandomUtils;
 
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -18,24 +20,31 @@ import java.util.concurrent.ThreadLocalRandom;
  * Decide que eventos seran errores segun la tasa configurada (0-100%),
  * asegura que todos los tipos de error del dominio se generen en algun momento y
  * permite configurar la distribucion de severidad (LOW/MEDIUM/HIGH/CRITICAL).
+ * <p>
+ * Thread-safe: {@link MultiDomainEngine} comparte una sola instancia entre todos los
+ * dominios activos, cada uno con su propio hilo de generacion.
  */
 public class ErrorInjector {
 
-    private final Map<Severity, Double> severityDistribution = new EnumMap<>(Severity.class);
-    private final Set<String> generatedErrorTypes = new HashSet<>();
+    /** Se reemplaza entero (copy-on-write) para que los lectores nunca vean un mapa a medias. */
+    private volatile Map<Severity, Double> severityDistribution = defaultDistribution();
+    private final Set<String> generatedErrorTypes = ConcurrentHashMap.newKeySet();
 
     public ErrorInjector() {
-        // distribucion por defecto
-        severityDistribution.put(Severity.LOW, 0.4);
-        severityDistribution.put(Severity.MEDIUM, 0.35);
-        severityDistribution.put(Severity.HIGH, 0.2);
-        severityDistribution.put(Severity.CRITICAL, 0.05);
+    }
+
+    private static Map<Severity, Double> defaultDistribution() {
+        Map<Severity, Double> distribution = new EnumMap<>(Severity.class);
+        distribution.put(Severity.LOW, 0.4);
+        distribution.put(Severity.MEDIUM, 0.35);
+        distribution.put(Severity.HIGH, 0.2);
+        distribution.put(Severity.CRITICAL, 0.05);
+        return Collections.unmodifiableMap(distribution);
     }
 
     public void setSeverityDistribution(Map<Severity, Double> distribution) {
-        if (distribution != null) {
-            severityDistribution.clear();
-            severityDistribution.putAll(distribution);
+        if (distribution != null && !distribution.isEmpty()) {
+            severityDistribution = Collections.unmodifiableMap(new EnumMap<>(distribution));
         }
     }
 
@@ -70,10 +79,11 @@ public class ErrorInjector {
      * Reparte una severidad segun la distribucion configurada.
      */
     public Severity nextSeverity() {
+        Map<Severity, Double> distribution = severityDistribution;
         double r = ThreadLocalRandom.current().nextDouble();
         double cumulative = 0.0;
         Severity result = Severity.LOW;
-        for (Map.Entry<Severity, Double> entry : severityDistribution.entrySet()) {
+        for (Map.Entry<Severity, Double> entry : distribution.entrySet()) {
             cumulative += entry.getValue();
             if (r < cumulative) {
                 return entry.getKey();

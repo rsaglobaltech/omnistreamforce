@@ -15,6 +15,7 @@
     <modules>
         <module>omnistreamforce-core</module>
         <module>omnistreamforce-domains</module>
+        <module>omnistreamforce-persistence</module>
         <module>omnistreamforce-ai</module>
         <module>omnistreamforce-cli</module>
     </modules>
@@ -37,10 +38,13 @@
         <aws-msk-iam-auth.version>2.1.0</aws-msk-iam-auth.version>
         <awssdk.version>2.25.0</awssdk.version>
         <junit.version>5.10.2</junit.version>
-        <testcontainers.version>1.19.7</testcontainers.version>
+        <!-- >=1.20 negocia la API de Docker: la 1.19.x pide la v1.32, que Docker 29 ya rechaza -->
+        <testcontainers.version>1.20.6</testcontainers.version>
         <avro.version>1.11.3</avro.version>
         <protobuf.version>3.25.3</protobuf.version>
         <assertj.version>3.25.3</assertj.version>
+        <hikaricp.version>5.1.0</hikaricp.version>
+        <postgresql.version>42.7.3</postgresql.version>
     </properties>
 
     <dependencyManagement>
@@ -84,6 +88,11 @@
             <dependency>
                 <groupId>de.omnistreamforce</groupId>
                 <artifactId>omnistreamforce-domain-fastfood</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>de.omnistreamforce</groupId>
+                <artifactId>omnistreamforce-persistence</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -164,6 +173,18 @@
                 <version>${awssdk.version}</version>
             </dependency>
 
+            <!-- Persistencia (modulo omnistreamforce-persistence) -->
+            <dependency>
+                <groupId>com.zaxxer</groupId>
+                <artifactId>HikariCP</artifactId>
+                <version>${hikaricp.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>${postgresql.version}</version>
+            </dependency>
+
             <!-- Testing -->
             <dependency>
                 <groupId>org.junit.jupiter</groupId>
@@ -171,11 +192,13 @@
                 <version>${junit.version}</version>
                 <scope>test</scope>
             </dependency>
+            <!-- BOM: alinea kafka, postgresql y junit-jupiter de Testcontainers a la misma version -->
             <dependency>
                 <groupId>org.testcontainers</groupId>
-                <artifactId>kafka</artifactId>
+                <artifactId>testcontainers-bom</artifactId>
                 <version>${testcontainers.version}</version>
-                <scope>test</scope>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
             <dependency>
                 <groupId>org.assertj</groupId>
@@ -204,6 +227,11 @@
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>3.2.5</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-shade-plugin</artifactId>
                     <version>3.5.3</version>
                 </plugin>
@@ -215,4 +243,30 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <profiles>
+        <!--
+            Los tests de integracion se llaman *IT.java y NO los ejecuta surefire: `mvn test`
+            nunca necesita Docker. Para lanzarlos: `mvn verify -Pit`.
+        -->
+        <profile>
+            <id>it</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

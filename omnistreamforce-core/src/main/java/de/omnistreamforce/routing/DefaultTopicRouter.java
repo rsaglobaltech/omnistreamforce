@@ -5,9 +5,13 @@ import de.omnistreamforce.core.EventType;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Implementacion por defecto de {@link TopicRouter} basada en una {@link DomainTopicConfig}.
+ * <p>
+ * Thread-safe: {@code route()} se invoca desde el hilo de generacion de cada dominio
+ * mientras {@code addMapping}/{@code removeMapping} pueden anadir o quitar dominios en caliente.
  */
 public class DefaultTopicRouter implements TopicRouter {
 
@@ -16,7 +20,7 @@ public class DefaultTopicRouter implements TopicRouter {
 
     public DefaultTopicRouter(DomainTopicConfig config) {
         this.config = Objects.requireNonNull(config);
-        this.mappingByDomain = new java.util.HashMap<>();
+        this.mappingByDomain = new ConcurrentHashMap<>();
         for (TopicMapping mapping : config.mappings()) {
             mappingByDomain.put(mapping.domain(), mapping);
         }
@@ -40,11 +44,11 @@ public class DefaultTopicRouter implements TopicRouter {
         return config;
     }
 
-    public synchronized void addMapping(TopicMapping mapping) {
+    public void addMapping(TopicMapping mapping) {
         mappingByDomain.put(mapping.domain(), mapping);
     }
 
-    public synchronized void removeMapping(String domain) {
+    public void removeMapping(String domain) {
         mappingByDomain.remove(domain);
     }
 }

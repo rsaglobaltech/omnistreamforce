@@ -21,9 +21,12 @@ class KafkaEventPublisherTest {
     private static final String ERROR_TOPIC = "fastfood-errors";
 
     private Event event(String orderId, String eventType) {
+        return event(orderId, eventType, Map.of("eventName", "OrderPlaced"));
+    }
+
+    private Event event(String orderId, String eventType, Map<String, String> metadata) {
         return new Event("id-" + orderId, eventType, "fastfood", "test", System.currentTimeMillis(),
-                "1.0", Map.of("orderId", orderId), Map.of("eventName", "OrderPlaced"),
-                "trace", "corr");
+                "1.0", Map.of("orderId", orderId), metadata, "trace", "corr");
     }
 
     private MockProducer<String, byte[]> mockProducer() {
@@ -82,6 +85,46 @@ class KafkaEventPublisherTest {
             assertThat(history.get(0).topic()).isEqualTo(TOPIC);
             assertThat(history.get(0).key()).isEqualTo("ORD-BK-123");
             assertThat(history.get(0).value()).isNotEmpty();
+        }
+    }
+
+    @Test
+    void precomputedKeyFromEngineWinsOverTheStrategy() {
+        try (MockProducer<String, byte[]> producer = mockProducer()) {
+            KafkaEventPublisher publisher = new KafkaEventPublisher(
+                    producer, new JsonEventSerializer(), KeyStrategy.RANDOM, null);
+
+            publisher.publish(event("ORD-1", "NORMAL",
+                    Map.of("eventName", "OrderPlaced", "kafka.key", "K-1")), TOPIC);
+
+            assertThat(producer.history().get(0).key()).isEqualTo("K-1");
+        }
+    }
+
+    @Test
+    void blankPrecomputedKeyFallsBackToTheStrategy() {
+        try (MockProducer<String, byte[]> producer = mockProducer()) {
+            KafkaEventPublisher publisher = new KafkaEventPublisher(
+                    producer, new JsonEventSerializer(), KeyStrategy.ENTITY_ID, "orderId");
+
+            publisher.publish(event("ORD-9", "NORMAL",
+                    Map.of("eventName", "OrderPlaced", "kafka.key", "  ")), TOPIC);
+
+            assertThat(producer.history().get(0).key()).isEqualTo("ORD-9");
+        }
+    }
+
+    @Test
+    void flushDelegatesToTheProducer() {
+        try (MockProducer<String, byte[]> producer = mockProducer()) {
+            KafkaEventPublisher publisher = new KafkaEventPublisher(
+                    producer, new JsonEventSerializer(), KeyStrategy.RANDOM, null);
+
+            publisher.publish(event("ORD-1", "NORMAL"), TOPIC);
+            publisher.flush();
+
+            assertThat(producer.flushed()).isTrue();
+            assertThat(producer.closed()).isFalse();
         }
     }
 
