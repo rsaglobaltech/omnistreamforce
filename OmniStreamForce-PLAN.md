@@ -1615,9 +1615,13 @@ Las fases Fase 6 (dominios extra) y Fase 8 (CLI) dependen de fases anteriores.
   progreso y controles; el render esta separado del refresco y se prueba con datos fabricados.
 - Comandos `interactive`, `connect` y `list-domains`, sumados a los que ya existian.
 - Banner nuevo, legible, que degrada a ASCII puro si la salida no es UTF-8.
-- Un detalle que solo aparecio al probar el binario: con la entrada no interactiva (una tuberia)
-  el CLI terminaba antes de publicar nada. Ahora los controles de teclado corren en un hilo
-  aparte y, si hay duracion fijada, se espera a que el motor la agote.
+- Dos detalles que solo aparecieron al usar el binario de verdad:
+  * Con la entrada no interactiva (una tuberia) el CLI terminaba antes de publicar nada. Ahora los
+    controles de teclado corren en un hilo aparte y, si hay duracion fijada, se espera a que el
+    motor la agote.
+  * La conexion a base de datos no se validaba en su paso: un puerto equivocado no fallaba hasta
+    el arranque de la publicacion, y lo hacia con un volcado del pool de conexiones. Ahora se
+    comprueba en el momento, con el mensaje de error real y opcion de reintentar.
 - Tests: 33 en el modulo (prompts, render, dashboard y ocho recorridos completos de la sesion con
   guion de respuestas y cluster de mentira). Verificado ademas con el fat JAR contra un broker
   real: `list-domains`, `connect` y un `interactive` de 5 s a 50 evt/s que publico exactamente

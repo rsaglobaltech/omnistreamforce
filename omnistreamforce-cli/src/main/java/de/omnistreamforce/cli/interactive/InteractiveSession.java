@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -35,6 +36,7 @@ public class InteractiveSession {
     private final ConsoleRenderer console;
     private final DomainRegistry registry;
     private final Function<KafkaConnectionConfig, ClusterGateway> gatewayFactory;
+    private final Consumer<PersistenceConfig> persistenceProbe;
 
     private ClusterGateway gateway;
 
@@ -42,10 +44,23 @@ public class InteractiveSession {
                               ConsoleRenderer console,
                               DomainRegistry registry,
                               Function<KafkaConnectionConfig, ClusterGateway> gatewayFactory) {
+        this(prompt, console, registry, gatewayFactory, InteractiveSession::probeJdbc);
+    }
+
+    /**
+     * @param persistenceProbe comprobacion de la conexion a base de datos; se inyecta para poder
+     *                         recorrer el flujo en los tests sin una base de datos real
+     */
+    public InteractiveSession(Prompter prompt,
+                              ConsoleRenderer console,
+                              DomainRegistry registry,
+                              Function<KafkaConnectionConfig, ClusterGateway> gatewayFactory,
+                              Consumer<PersistenceConfig> persistenceProbe) {
         this.prompt = prompt;
         this.console = console;
         this.registry = registry;
         this.gatewayFactory = gatewayFactory;
+        this.persistenceProbe = persistenceProbe;
     }
 
     /** El gateway conectado durante la sesion, para reutilizarlo al publicar. */
@@ -226,16 +241,55 @@ public class InteractiveSession {
         };
     }
 
+    /**
+     * Pregunta por la base de datos y <b>valida la conexion en el sitio</b>. Sin esto el fallo
+     * aparecia mucho despues, al arrancar a publicar, en forma de volcado del pool de conexiones.
+     */
     private PersistenceConfig askPersistence() {
-        String url = prompt.ask("URL JDBC", "jdbc:postgresql://localhost:5432/osf");
-        String user = prompt.ask("Usuario", "osf");
-        String password = prompt.ask("Password", "osf");
-        String outbox = prompt.ask("Tabla outbox", PersistenceConfig.DEFAULT_OUTBOX_TABLE);
-        return PersistenceConfig.builder(url)
-                .username(user)
-                .password(password)
-                .outboxTable(outbox)
-                .build();
+        while (true) {
+            String url = prompt.ask("URL JDBC", "jdbc:postgresql://localhost:5432/osf");
+            String user = prompt.ask("Usuario", "osf");
+            String password = prompt.ask("Password", "osf");
+            String outbox = prompt.ask("Tabla outbox", PersistenceConfig.DEFAULT_OUTBOX_TABLE);
+
+            PersistenceConfig config = PersistenceConfig.builder(url)
+                    .username(user)
+                    .password(password)
+                    .outboxTable(outbox)
+                    .build();
+            try {
+                persistenceProbe.accept(config);
+                console.success("Conexion a la base de datos verificada");
+                return config;
+            } catch (RuntimeException e) {
+                console.error("No se pudo conectar: " + rootMessage(e));
+                if (!prompt.confirm("Reintentar con otros datos?", true)) {
+                    throw new Prompter.AbortedException("Sin conexion a la base de datos");
+                }
+            }
+        }
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getMessage() == null ? root.toString() : root.getMessage();
+    }
+
+    /** Comprobacion por defecto: abrir y cerrar una conexion, con un login corto. */
+    static void probeJdbc(PersistenceConfig config) {
+        int previousTimeout = java.sql.DriverManager.getLoginTimeout();
+        java.sql.DriverManager.setLoginTimeout(5);
+        try (java.sql.Connection connection = java.sql.DriverManager.getConnection(
+                config.jdbcUrl(), config.username(), config.password())) {
+            connection.getMetaData();
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        } finally {
+            java.sql.DriverManager.setLoginTimeout(previousTimeout);
+        }
     }
 
     // --- Paso 5: configuracion global ---------------------------------------

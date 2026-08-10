@@ -37,12 +37,16 @@ class InteractiveSessionTest {
         registry = new DomainRegistry();
     }
 
+    /** Por defecto la comprobacion de base de datos pasa: aqui no hay ninguna levantada. */
+    private java.util.function.Consumer<de.omnistreamforce.persistence.PersistenceConfig> probe =
+            config -> { };
+
     private SessionPlan runWith(String... answers) {
         String script = String.join(System.lineSeparator(), answers) + System.lineSeparator();
         PrintStream out = new PrintStream(output, true, StandardCharsets.UTF_8);
         Prompter prompter = new Prompter(new BufferedReader(new StringReader(script)), out);
         ConsoleRenderer console = new ConsoleRenderer(out, false);
-        return new InteractiveSession(prompter, console, registry, config -> gateway).run();
+        return new InteractiveSession(prompter, console, registry, config -> gateway, probe).run();
     }
 
     private int domainIndexOf(String domain) {
@@ -188,6 +192,48 @@ class InteractiveSessionTest {
                 .containsExactly("fastfood", "ecommerce");
         assertThat(plan.totalEventsPerSecond()).isEqualTo(140);
         assertThat(gateway.createdTopics).contains("ecommerce-orders", "ecommerce-errors");
+    }
+
+    @Test
+    void anUnreachableDatabaseIsCaughtInTheStepAndCanBeRetried() {
+        // primera comprobacion falla, la segunda pasa: es lo que ocurre al corregir el puerto
+        java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+        probe = config -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw new IllegalStateException("Connection to localhost:5432 refused");
+            }
+        };
+
+        SessionPlan plan = runWith(
+                "1", "localhost:9092", "PLAINTEXT",
+                String.valueOf(domainIndexOf("fastfood")),
+                "fastfood-events", "n", "50", "10",
+                "2",                                            // destino: base de datos
+                "jdbc:postgresql://localhost:5432/osf", "osf", "osf", "osf_outbox",
+                "s",                                            // reintentar
+                "jdbc:postgresql://localhost:55433/osf", "osf", "osf", "osf_outbox",
+                "1", "1", "0", "1", "s");
+
+        assertThat(attempts.get()).isEqualTo(2);
+        assertThat(plan.persistence().jdbcUrl()).isEqualTo("jdbc:postgresql://localhost:55433/osf");
+        assertThat(output.toString(StandardCharsets.UTF_8))
+                .contains("No se pudo conectar: Connection to localhost:5432 refused");
+    }
+
+    @Test
+    void decliningToRetryTheDatabaseAborts() {
+        probe = config -> {
+            throw new IllegalStateException("Connection refused");
+        };
+
+        assertThatThrownBy(() -> runWith(
+                "1", "localhost:9092", "PLAINTEXT",
+                String.valueOf(domainIndexOf("fastfood")),
+                "fastfood-events", "n", "50", "10",
+                "2",
+                "jdbc:postgresql://localhost:5432/osf", "osf", "osf", "osf_outbox",
+                "n"))
+                .isInstanceOf(Prompter.AbortedException.class);
     }
 
     @Test
