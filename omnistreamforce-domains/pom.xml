@@ -21,6 +21,7 @@
         <module>energy</module>
         <module>autos</module>
         <module>highway</module>
+        <module>fastfood</module>
     </modules>
 
     <dependencies>

@@ -81,6 +81,11 @@
                 <artifactId>omnistreamforce-domain-highway</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>de.omnistreamforce</groupId>
+                <artifactId>omnistreamforce-domain-fastfood</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
             <!-- Kafka -->
             <dependency>
