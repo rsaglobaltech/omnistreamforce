@@ -55,6 +55,31 @@ class ErrorInjectorTest {
     }
 
     @Test
+    void theSeverityChosenByTheDomainIsNotOverwritten() {
+        // un fallo de frenos o una rotura de cadena de frio son criticos por su naturaleza:
+        // la distribucion configurada no debe degradarlos
+        de.omnistreamforce.core.Event critical = new de.omnistreamforce.core.Event(
+                "id", "ERROR", "autos", "test", 1L, "1.0", Map.of(),
+                Map.of("errorType", "BrakeFailure", "severity", "CRITICAL"), "t", "c");
+
+        de.omnistreamforce.core.Event result = ErrorInjector.withSeverity(critical, Severity.LOW);
+
+        assertThat(result.metadata().get("severity")).isEqualTo("CRITICAL");
+        assertThat(result).isSameAs(critical);
+    }
+
+    @Test
+    void severityIsAppliedWhenTheDomainDoesNotSetOne() {
+        de.omnistreamforce.core.Event bare = new de.omnistreamforce.core.Event(
+                "id", "ERROR", "stub", "test", 1L, "1.0", Map.of(),
+                Map.of("errorType", "Whatever"), "t", "c");
+
+        de.omnistreamforce.core.Event result = ErrorInjector.withSeverity(bare, Severity.HIGH);
+
+        assertThat(result.metadata().get("severity")).isEqualTo("HIGH");
+    }
+
+    @Test
     void customSeverityDistributionIsRespected() {
         ErrorInjector injector = new ErrorInjector();
         Map<Severity, Double> dist = new EnumMap<>(Severity.class);

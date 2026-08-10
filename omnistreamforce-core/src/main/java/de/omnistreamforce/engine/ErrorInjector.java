@@ -99,12 +99,20 @@ public class ErrorInjector {
 
     /**
      * Reconstruye el evento aplicando la severidad indicada a los metadatos.
+     * <p>
+     * Si el dominio ya fijo una severidad, se respeta: el generador sabe que una rotura de la
+     * cadena de frio o un fallo de frenos son criticos, y la distribucion configurada no debe
+     * degradarlos a LOW. La distribucion solo decide cuando el dominio no se pronuncia.
      */
     public static Event withSeverity(Event event, Severity severity) {
         if (severity == null) {
             return event;
         }
         java.util.Map<String, String> metadata = new java.util.LinkedHashMap<>(event.metadata());
+        String existing = metadata.get("severity");
+        if (existing != null && !existing.isBlank()) {
+            return event;
+        }
         metadata.put("severity", severity.name());
         return new Event(
                 event.eventId(), event.eventType(), event.domain(), event.source(), event.timestamp(),

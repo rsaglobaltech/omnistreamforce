@@ -116,14 +116,19 @@ tocar el core**: basta un módulo nuevo que implemente `DomainGenerator` y se re
 | `healthcare` | 5 (admisión, constantes, medicación, laboratorio, alta) | 4 |
 | `ecommerce` | 5 (pedido, pago, inventario, envío, cancelación) | 4 |
 | `fastfood` | 13 (pedidos y cocina, drive-thru y canales, inventario) | 8 |
+| `energy` | 4 (generación, estado de red, contador, precio) | 3 |
+| `autos` | 4 (telemetría, estado, viaje, mantenimiento) | 4 |
+| `highway` | 4 (tráfico, paso de vehículo, incidente, peaje) | 3 |
 
 `fastfood` modela franquicias: la marca viaja en el payload (`brand`) y en los identificadores
 (`storeId=BK-4821`, `orderId=ORD-MCD-38472910`), con carta e ingredientes propios de cada una.
 Añadir otra franquicia es añadir una constante al enum `FastFoodBrand`.
 
 Los eventos de error son coherentes con su semántica, no valores al azar: `KitchenDelay` supera
-siempre el SLA de cocina, `ColdChainBreach` supera el umbral de −18 °C, `IngredientOutOfStock`
-deja el stock a cero y lista los artículos bloqueados.
+siempre el SLA de cocina, `ColdChainBreach` supera el umbral de −18 °C, `EngineOverheat` pasa de
+110 °C, `TrafficJam` baja de 20 km/h y `GridFrequencyDeviation` se sale del margen de ±0,2 Hz.
+Los datos normales también guardan relación: las rpm acompañan a la velocidad, una central nuclear
+no rinde como una solar, y a más densidad de tráfico menos velocidad media.
 
 ## Destinos
 
@@ -220,7 +225,7 @@ OSF_IT_KAFKA_BOOTSTRAP=localhost:9092 mvn verify -Pit
 | 15 CDC con Debezium | Completado |
 | 16 Selección de destino (Kafka / Outbox / Dual) | Completado |
 | 9 Configuración YAML, perfiles y modo batch | Completado |
-| 6 Dominios energy, autos y highway | Pendiente |
+| 6 Dominios energy, autos y highway | Completado |
 | 7 Integración con IA | Pendiente |
 | 10 Distribución y empaquetado | Pendiente |
 
